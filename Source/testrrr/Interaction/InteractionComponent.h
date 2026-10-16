@@ -13,6 +13,7 @@
 
 class UCarryComponent;
 class UInteractionPromptWidget;
+class UItemUseComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FInteractionPromptChanged, FText, Prompt, bool, bAvailable);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FInteractionFinished, FInteractionResult, Result);
@@ -51,6 +52,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Interaction|UI")
 	FText DropInputLabel = FText::FromString(TEXT("G"));
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Interaction|UI")
+	FText UseInputLabel = FText::FromString(TEXT("좌클릭"));
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Interaction|UI")
 	TSubclassOf<UInteractionPromptWidget> PromptWidgetClass;
 
@@ -78,6 +82,9 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UCarryComponent> Carry;
 
+	UPROPERTY(Transient)
+	TObjectPtr<UItemUseComponent> ItemUse;
+
 	// 안내용 캐시이므로 대상의 수명을 연장하지 않는다.
 	UPROPERTY(Transient)
 	TWeakObjectPtr<AActor> FocusedActor;
@@ -95,4 +102,7 @@ private:
 
 	UFUNCTION()
 	void HandleCarryStateChanged();
+
+	UFUNCTION()
+	void HandleUseStateChanged();
 };

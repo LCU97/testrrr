@@ -36,7 +36,7 @@ AActor
 
 잡기·놓기는 Physics Handle로 수행한다. 월드 충돌을 유지하고 운반 중 Pawn 채널만 무시한 뒤 원래 응답을 복원한다. 이 MVP는 1인칭 싱글플레이용이며, 여러 플레이어에 대한 복제·권한 처리는 포함하지 않는다. 물건이 파괴되거나 물리 시뮬레이션이 꺼지거나 플레이어와 400cm 이상 벌어지면 강제 해제한다.
 
-`bCanThrow=false`는 내려놓기를 막지 않는다. 던지기 입력과 추진력은 이번 범위에 포함하지 않는다. 이후 던지기 실행은 CarryComponent의 `CanThrowHeldObject()`를 통과한 경우에만 허용한다.
+`bCanThrow=false`는 내려놓기를 막지 않는다. 좌클릭 사용과 던지기는 후속 구현인 [아이템 사용 프레임워크](ItemUseFramework.md)에 설명되어 있다. UseBehavior가 던지기로 설정된 물건만 좌클릭으로 던져지며, 실제 실행은 CarryComponent의 `CanThrowHeldObject()`를 통과해야 한다.
 
 ### 스위치 작업자
 

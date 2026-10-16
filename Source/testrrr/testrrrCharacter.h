@@ -1,6 +1,6 @@
 /*
  * 1인칭 캐릭터와 상호작용 입력 연결
- * 기존 이동·점프 구조에 Enhanced Input 기반 E/G 입력과 상호작용·운반 컴포넌트를 추가한다.
+ * 기존 이동·점프 구조에 Enhanced Input 기반 E/G/아이템 사용 입력과 공통 컴포넌트를 추가한다.
  * 입력은 요청만 전달하고 대상별 동작과 운반 상태 관리는 각 컴포넌트에 맡긴다.
  */
 
@@ -21,6 +21,7 @@ class UInputAction;
 struct FInputActionValue;
 class UCarryComponent;
 class UInteractionComponent;
+class UItemUseComponent;
 class UInputMappingContext;
 class UEnhancedInputLocalPlayerSubsystem;
 
@@ -50,6 +51,10 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Interaction")
 	TObjectPtr<UInteractionComponent> InteractionComponent;
 
+	// 사용 시작·유지·종료와 아이템 교체 시 취소는 사용 컴포넌트가 담당한다.
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Interaction")
+	TObjectPtr<UItemUseComponent> ItemUseComponent;
+
 	// 에셋을 지정하지 않으면 C++에서 Boolean Input Action을 생성한다.
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Input|Interaction")
 	TObjectPtr<UInputAction> InteractAction;
@@ -57,12 +62,18 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Input|Interaction")
 	TObjectPtr<UInputAction> DropAction;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Input|Interaction")
+	TObjectPtr<UInputAction> UseItemAction;
+
 	// BP 기본값에서 키를 변경하면 안내 문구의 키 이름도 함께 갱신된다.
 	UPROPERTY(EditDefaultsOnly, Category="Input|Interaction")
 	FKey InteractKey = EKeys::E;
 
 	UPROPERTY(EditDefaultsOnly, Category="Input|Interaction")
 	FKey DropKey = EKeys::G;
+
+	UPROPERTY(EditDefaultsOnly, Category="Input|Interaction")
+	FKey UseItemKey = EKeys::LeftMouseButton;
 
 	/** Jump Input Action */
 	UPROPERTY(EditAnywhere, Category ="Input")
@@ -116,6 +127,9 @@ protected:
 	// 입력 함수는 요청 전달만 담당하며, 개별 물건과 스위치의 종류를 구별하지 않는다.
 	void DoInteract();
 	void DoDrop();
+	void DoBeginUseItem();
+	void DoEndUseItem();
+	void DoCancelUseItem();
 	void RemoveInteractionMapping();
 
 	// 이 캐릭터가 만든 문맥만 보관하여 빙의 해제 시 기존 이동 문맥을 건드리지 않는다.

@@ -1,5 +1,5 @@
 /*
- * 1인칭 캐릭터 구현 및 E/G 입력 배선
+ * 1인칭 캐릭터 구현 및 E/G/좌클릭 입력 배선
  * 기존 이동·시점·점프 처리에 상호작용용 Input Action과 Mapping Context를 연결한다.
  * 빙의 해제·종료 시에는 이 캐릭터가 추가한 입력 문맥을 정리한다.
  */
@@ -17,6 +17,7 @@
 #include "testrrr.h"
 #include "Interaction/CarryComponent.h"
 #include "Interaction/InteractionComponent.h"
+#include "Interaction/ItemUseComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "Engine/LocalPlayer.h"
 #include "GameFramework/PlayerController.h"
@@ -27,6 +28,7 @@ AtestrrrCharacter::AtestrrrCharacter()
 {
 	// 자식 캐릭터 BP에도 공통 상호작용과 운반 기능이 상속되도록 기본 컴포넌트로 만든다.
 	CarryComponent = CreateDefaultSubobject<UCarryComponent>(TEXT("CarryComponent"));
+	ItemUseComponent = CreateDefaultSubobject<UItemUseComponent>(TEXT("ItemUseComponent"));
 	InteractionComponent = CreateDefaultSubobject<UInteractionComponent>(TEXT("InteractionComponent"));
 	// Set size for collision capsule
 	GetCapsuleComponent()->InitCapsuleSize(55.f, 96.0f);
@@ -78,13 +80,20 @@ void AtestrrrCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCo
 			DropAction = NewObject<UInputAction>(this, TEXT("IA_Drop"));
 			DropAction->ValueType = EInputActionValueType::Boolean;
 		}
-		// 기존 이동 입력 문맥과 분리하여 E/G 키 배정만 관리한다.
+		if (!UseItemAction)
+		{
+			UseItemAction = NewObject<UInputAction>(this, TEXT("IA_UseItem"));
+			UseItemAction->ValueType = EInputActionValueType::Boolean;
+		}
+		// 사용 동작은 액터가 선택하며, 입력 계층은 사용 요청과 키 배정만 관리한다.
 		InteractionMappingContext = NewObject<UInputMappingContext>(this);
 		InteractionMappingContext->MapKey(InteractAction, InteractKey);
 		InteractionMappingContext->MapKey(DropAction, DropKey);
+		InteractionMappingContext->MapKey(UseItemAction, UseItemKey);
 		// 실제 키 배정과 화면에 표시하는 키 이름이 일치하도록 맞춘다.
 		InteractionComponent->InteractInputLabel = InteractKey.GetDisplayName();
 		InteractionComponent->DropInputLabel = DropKey.GetDisplayName();
+		InteractionComponent->UseInputLabel = UseItemKey.GetDisplayName();
 		if (APlayerController* PC = Cast<APlayerController>(GetController()))
 		{
 			if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer()))
@@ -97,6 +106,10 @@ void AtestrrrCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCo
 		// Started를 사용하여 키를 누른 한 번에 한 번만 요청한다. 누르는 동안 반복하지 않는다.
 		EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Started, this, &AtestrrrCharacter::DoInteract);
 		EnhancedInputComponent->BindAction(DropAction, ETriggerEvent::Started, this, &AtestrrrCharacter::DoDrop);
+		// 단발·지속 동작이 같은 액션을 사용한다. 지속 갱신은 사용 세션의 Tick이 담당한다.
+		EnhancedInputComponent->BindAction(UseItemAction, ETriggerEvent::Started, this, &AtestrrrCharacter::DoBeginUseItem);
+		EnhancedInputComponent->BindAction(UseItemAction, ETriggerEvent::Completed, this, &AtestrrrCharacter::DoEndUseItem);
+		EnhancedInputComponent->BindAction(UseItemAction, ETriggerEvent::Canceled, this, &AtestrrrCharacter::DoCancelUseItem);
 
 		// Jumping
 		EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Started, this, &AtestrrrCharacter::DoJumpStart);
@@ -129,6 +142,8 @@ void AtestrrrCharacter::DoDrop()
 
 void AtestrrrCharacter::RemoveInteractionMapping()
 {
+	// 입력 문맥을 바꿀 때 키 종료 이벤트가 오지 않더라도 지속 효과는 반드시 멈춘다.
+	ItemUseComponent->CancelUseInput();
 	// 전체 입력을 지우지 않고 자신이 추가한 문맥만 제거한다.
 	if (InteractionInputSubsystem.IsValid() && InteractionMappingContext)
 	{
@@ -139,9 +154,9 @@ void AtestrrrCharacter::RemoveInteractionMapping()
 
 void AtestrrrCharacter::UnPossessed()
 {
-	// 이전 Pawn의 E/G 입력이 남지 않게 제거하고, 운반 중이면 일반 내려놓기를 요청한다.
+	// 이전 Pawn의 입력·지속 효과를 정리하고 물건별 일반 내려놓기 제한과 무관하게 해제한다.
 	RemoveInteractionMapping();
-	CarryComponent->TryDrop();
+	CarryComponent->ForceRelease();
 	Super::UnPossessed();
 }
 
@@ -149,6 +164,21 @@ void AtestrrrCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	RemoveInteractionMapping();
 	Super::EndPlay(EndPlayReason);
+}
+
+void AtestrrrCharacter::DoBeginUseItem()
+{
+	ItemUseComponent->BeginUseInput();
+}
+
+void AtestrrrCharacter::DoEndUseItem()
+{
+	ItemUseComponent->EndUseInput();
+}
+
+void AtestrrrCharacter::DoCancelUseItem()
+{
+	ItemUseComponent->CancelUseInput();
 }
 
 

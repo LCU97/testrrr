@@ -43,3 +43,5 @@ bool UCarryableComponent::CanThrow_Implementation(const FInteractionContext& Con
 // 기본 알림은 비워두고, 자식 C++/BP에서 필요한 효과만 추가한다.
 void UCarryableComponent::OnGrabbed_Implementation(const FInteractionContext& Context) {}
 void UCarryableComponent::OnReleased_Implementation(const FInteractionContext& Context) {}
+
+void UCarryableComponent::OnReleasedWithReason_Implementation(const FInteractionContext& Context, ECarryReleaseReason Reason) {}

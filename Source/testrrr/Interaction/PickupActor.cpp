@@ -7,6 +7,7 @@
 #include "Interaction/PickupActor.h"
 #include "Interaction/CarryableComponent.h"
 #include "Interaction/CarryComponent.h"
+#include "Interaction/ItemUseBehavior.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "UObject/ConstructorHelpers.h"
@@ -59,4 +60,22 @@ FInteractionResult APickupActor::Interact_Implementation(const FInteractionConte
 		Result.FailureReason = DisabledReason;
 	}
 	return Result;
+}
+
+UItemUseBehavior* APickupActor::GetItemUseBehavior_Implementation() const
+{
+	return UseBehavior;
+}
+
+bool APickupActor::CanUseItem_Implementation(const FItemUseContext& Context) const
+{
+	// 사용 입력은 현재 이 물건을 들고 있는 주체만 보낼 수 있다.
+	return bItemUseEnabled && IsValid(UseBehavior) && Context.Item == this && IsValid(Context.User)
+		&& IsValid(Context.Carrier) && Context.Carrier->GetOwner() == Context.User
+		&& Context.Carrier->GetHeldActor() == this;
+}
+
+void APickupActor::OnItemThrown_Implementation(const FItemThrowInfo& Info)
+{
+	// 기본 물건은 날아가기만 한다. 폭탄 등은 자식 C++/BP에서 자신의 후속 기능을 구현한다.
 }

@@ -9,6 +9,7 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "ButtonInteractionTypes.h"
+#include "ItemUseTypes.h"
 #include "CarryableComponent.generated.h"
 
 class UPrimitiveComponent;
@@ -56,6 +57,13 @@ public:
 	// 프레임워크가 물리 제약과 운반 상태를 해제한 뒤 호출한다.
 	UFUNCTION(BlueprintNativeEvent, Category="Carry")
 	void OnReleased(const FInteractionContext& Context);
+
+	// 기존 OnReleased와 별개로 해제 사유가 필요한 아이템이 구독할 수 있는 확장점이다.
+	UFUNCTION(BlueprintNativeEvent, Category="Carry")
+	void OnReleasedWithReason(const FInteractionContext& Context, ECarryReleaseReason Reason);
+
+	UPROPERTY(Transient, BlueprintReadOnly, Category="Carry")
+	ECarryReleaseReason LastReleaseReason = ECarryReleaseReason::Forced;
 
 	// 중복 운반 방지용 약한 참조. CarryComponent가 관리하므로 아이템 코드에서 직접 바꾸지 않는다.
 	UPROPERTY(Transient, BlueprintReadOnly, Category="Carry")

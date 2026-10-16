@@ -1,6 +1,6 @@
 /*
  * 상호작용 프레임워크 자동 검증
- * 임시 월드에서 탐색 주기·최신 조준·차폐·거리·운반 중 차단·내려놓기·파괴 복구를 확인한다.
+ * 임시 월드에서 상호작용·운반·아이템 사용 수명주기와 질량을 반영한 던지기를 확인한다.
  * 실제 맵을 변경하지 않으며 테스트 월드는 종료 시 정리한다.
  */
 
@@ -17,6 +17,13 @@
 #include "Interaction/CarryableComponent.h"
 #include "Interaction/PickupActor.h"
 #include "Interaction/ToggleSwitchActor.h"
+#include "Interaction/ItemUseComponent.h"
+#include "Interaction/ThrowItemUseBehavior.h"
+#include "Interaction/ItemThrowPhysics.h"
+#include "Tests/ItemUseTestTypes.h"
+#include "HAL/FileManager.h"
+#include "Misc/PackageName.h"
+#include "UObject/UObjectIterator.h"
 
 namespace InteractionTests
 {
@@ -26,6 +33,7 @@ namespace InteractionTests
 		UWorld* World;
 		AActor* Player;
 		UCarryComponent* Carry;
+		UItemUseComponent* ItemUse;
 		UInteractionComponent* Interaction;
 
 		FWorldFixture()
@@ -45,6 +53,9 @@ namespace InteractionTests
 			Carry = NewObject<UCarryComponent>(Player);
 			Player->AddInstanceComponent(Carry);
 			Carry->RegisterComponent();
+			ItemUse = NewObject<UItemUseComponent>(Player);
+			Player->AddInstanceComponent(ItemUse);
+			ItemUse->RegisterComponent();
 			Interaction = NewObject<UInteractionComponent>(Player);
 			Interaction->bShowDefaultPrompt = false;
 			Player->AddInstanceComponent(Interaction);
@@ -162,6 +173,464 @@ bool FInteractionCarryTest::RunTest(const FString& Parameters)
 	Item->Destroy();
 	TestFalse(TEXT("Destroyed held item clears carry state"), F.Carry->IsHolding());
 	TestTrue(TEXT("Destroyed held item unlocks E"), F.Interaction->CanInteractNow());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FItemUseDispatchTest, "HundredButtons.ItemUse.DispatchAndRestrictions",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FItemUseDispatchTest::RunTest(const FString& Parameters)
+{
+	InteractionTests::FWorldFixture F;
+	APickupActor* Item = F.Spawn<APickupActor>(FVector(180, 0, 0));
+	TestTrue(TEXT("Grab a plain item"), F.Interaction->TryInteract().bSucceeded);
+	// 던지기 허용 플래그만 있다고 사용 동작 없는 물건이 자동으로 던져져서는 안 된다.
+	TestFalse(TEXT("No behavior means no left-click action"), F.ItemUse->BeginUseInput().bSucceeded);
+	TestTrue(TEXT("Plain item stays held"), F.Carry->IsHolding());
+	F.ItemUse->EndUseInput();
+	UItemUseTestBehavior* Behavior = NewObject<UItemUseTestBehavior>(Item);
+	Behavior->bContinuous = false;
+	Item->UseBehavior = Behavior;
+	TestTrue(TEXT("Assigned non-throw action is dispatched"), F.ItemUse->BeginUseInput().bSucceeded);
+	F.ItemUse->EndUseInput();
+	TestEqual(TEXT("Single use begins once"), Behavior->BeginCount, 1);
+	TestEqual(TEXT("Single use does not receive a trailing EndUse"), Behavior->EndCount, 0);
+	TestTrue(TEXT("Non-throw action keeps the item held"), F.Carry->IsHolding());
+	Item->UseBehavior = NewObject<UThrowItemUseBehavior>(Item);
+	Item->Carryable->bCanThrow = false;
+	TestFalse(TEXT("Throw restriction is respected"), F.ItemUse->BeginUseInput().bSucceeded);
+	TestTrue(TEXT("Rejected throw keeps item held"), F.Carry->IsHolding());
+	F.ItemUse->EndUseInput();
+	Item->Carryable->bCanThrow = true;
+	Item->bItemUseEnabled = false;
+	TestFalse(TEXT("Item can disable its own use"), F.ItemUse->BeginUseInput().bSucceeded);
+	F.ItemUse->EndUseInput();
+	TestTrue(TEXT("Disabled use does not block G drop"), F.Carry->TryDrop());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FItemUseLifecycleTest, "HundredButtons.ItemUse.LifecycleAndNoRetarget",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FItemUseLifecycleTest::RunTest(const FString& Parameters)
+{
+	InteractionTests::FWorldFixture F;
+	APickupActor* First = F.Spawn<APickupActor>(FVector(180, 0, 0));
+	APickupActor* Second = F.Spawn<APickupActor>(FVector(0, 180, 0));
+	UItemUseTestBehavior* A = NewObject<UItemUseTestBehavior>(First);
+	UItemUseTestBehavior* B = NewObject<UItemUseTestBehavior>(Second);
+	First->UseBehavior = A;
+	Second->UseBehavior = B;
+	F.Interaction->TryInteract();
+	TestTrue(TEXT("Continuous use begins"), F.ItemUse->BeginUseInput().bKeepUsing);
+	TestFalse(TEXT("Repeated start while pressed is ignored"), F.ItemUse->BeginUseInput().bSucceeded);
+	TestEqual(TEXT("Begin is delivered once"), A->BeginCount, 1);
+	F.Player->SetActorRotation(FRotator(0, 90, 0));
+	F.Tick(0.016f);
+	TestTrue(TEXT("Continuous action is updated"), A->UpdateCount > 0);
+	TestTrue(TEXT("Update uses current aim"), A->LastDirection.Equals(FVector::RightVector, 0.001));
+	F.ItemUse->EndUseInput();
+	TestEqual(TEXT("Release ends the original action"), A->EndCount, 1);
+	TestEqual(TEXT("Normal release is not cancellation"), A->CancelCount, 0);
+	TestFalse(TEXT("Release clears session"), F.ItemUse->IsUsing());
+	F.ItemUse->BeginUseInput();
+	F.Carry->TryDrop();
+	TestEqual(TEXT("Dropping cancels active use once"), A->CancelCount, 1);
+	// 첫 물건이 물리적으로 움직여도 두 번째 물건을 안정적으로 선택하도록 멀리 옮긴다.
+	First->SetActorLocation(FVector(1000, 1000, 0));
+	F.Interaction->TryInteract();
+	TestEqual(TEXT("Second item is held"), F.Carry->GetHeldActor(), static_cast<AActor*>(Second));
+	TestFalse(TEXT("Held click cannot start the newly grabbed item"), F.ItemUse->BeginUseInput().bSucceeded);
+	F.ItemUse->EndUseInput();
+	TestEqual(TEXT("Old release is not sent to new item"), B->EndCount, 0);
+	TestTrue(TEXT("Fresh click starts new item"), F.ItemUse->BeginUseInput().bSucceeded);
+	Second->Destroy();
+	TestFalse(TEXT("Item destruction clears session"), F.ItemUse->IsUsing());
+	TestEqual(TEXT("Destruction cancels effect once"), B->CancelCount, 1);
+	F.ItemUse->CancelUseInput();
+	TestEqual(TEXT("Subsequent cancellation is harmless"), B->CancelCount, 1);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FItemUseBeginCancelTest, "HundredButtons.ItemUse.FailedAndInterruptedBegin",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FItemUseBeginCancelTest::RunTest(const FString& Parameters)
+{
+	InteractionTests::FWorldFixture F;
+	APickupActor* Item = F.Spawn<APickupActor>(FVector(180, 0, 0));
+	UItemUseTestBehavior* Behavior = NewObject<UItemUseTestBehavior>(Item);
+	Item->UseBehavior = Behavior;
+	F.Interaction->TryInteract();
+	Behavior->bFailBegin = true;
+	TestFalse(TEXT("Failed Begin reports failure"), F.ItemUse->BeginUseInput().bSucceeded);
+	TestFalse(TEXT("Failed Begin leaves no session"), F.ItemUse->IsUsing());
+	TestEqual(TEXT("Partially initialized effects are cleaned up"), Behavior->CancelCount, 1);
+	F.ItemUse->EndUseInput();
+	Behavior->bFailBegin = false;
+	Behavior->bDropDuringBegin = true;
+	TestFalse(TEXT("Drop during continuous Begin interrupts start"), F.ItemUse->BeginUseInput().bSucceeded);
+	TestFalse(TEXT("Interrupted Begin leaves no session"), F.ItemUse->IsUsing());
+	TestFalse(TEXT("Drop inside callback completes"), F.Carry->IsHolding());
+	TestEqual(TEXT("Interrupted Begin cancels exactly once"), Behavior->CancelCount, 2);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FItemThrowPhysicsTest, "HundredButtons.ItemUse.MassImpulseFormula",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FItemThrowPhysicsTest::RunTest(const FString& Parameters)
+{
+	FItemThrowSettings Settings;
+	FItemThrowInfo Info;
+	FVector Impulse;
+	TestTrue(TEXT("Light body has valid impulse"), ItemThrowPhysics::CalculateImpulse(Settings, 0.6f, FVector(2, 0, 0), Info, Impulse));
+	TestTrue(TEXT("Light body added speed capped at 18m/s"), FMath::IsNearlyEqual(Info.AddedSpeedMetersPerSecond, 18.f));
+	TestTrue(TEXT("Direction normalized and SI converted to UE units"), Impulse.Equals(FVector(1080, 0, 0), 0.01));
+	ItemThrowPhysics::CalculateImpulse(Settings, 2.f, FVector::ForwardVector, Info, Impulse);
+	TestTrue(TEXT("2kg receives 6m/s added speed"), FMath::IsNearlyEqual(Info.AddedSpeedMetersPerSecond, 6.f));
+	ItemThrowPhysics::CalculateImpulse(Settings, 10.f, FVector::ForwardVector, Info, Impulse);
+	TestTrue(TEXT("10kg receives 1.2m/s added speed"), FMath::IsNearlyEqual(Info.AddedSpeedMetersPerSecond, 1.2f));
+	TestFalse(TEXT("Zero mass rejected"), ItemThrowPhysics::CalculateImpulse(Settings, 0.f, FVector::ForwardVector, Info, Impulse));
+	TestFalse(TEXT("Zero direction rejected"), ItemThrowPhysics::CalculateImpulse(Settings, 1.f, FVector::ZeroVector, Info, Impulse));
+	Settings.ImpulseNewtonSeconds = -1.f;
+	TestFalse(TEXT("Negative impulse rejected"), ItemThrowPhysics::CalculateImpulse(Settings, 1.f, FVector::ForwardVector, Info, Impulse));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FItemThrowIntegrationTest, "HundredButtons.ItemUse.ThrowPhysicsAndReaction",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FItemThrowIntegrationTest::RunTest(const FString& Parameters)
+{
+	// 식뿐 아니라 실제 엔진 물리에서도 같은 충격량에 대한 질량 차이를 확인한다.
+	for (const float Mass : {10.f, 20.f})
+	{
+		InteractionTests::FWorldFixture F;
+		AItemUseTestPickupActor* Item = F.Spawn<AItemUseTestPickupActor>(FVector(180, 0, 0));
+		Item->Mesh->SetMassOverrideInKg(NAME_None, Mass, true);
+		Item->Mesh->SetEnableGravity(false);
+		Item->Mesh->SetLinearDamping(0.f);
+		F.Interaction->TryInteract();
+		const FItemUseResult Result = F.ItemUse->BeginUseInput();
+		TestTrue(TEXT("Throw behavior accepts use"), Result.bSucceeded);
+		TestFalse(TEXT("Throw is a single action"), Result.bKeepUsing);
+		TestFalse(TEXT("Throw releases held object"), F.Carry->IsHolding());
+		TestFalse(TEXT("Throw does not leave a use session"), F.ItemUse->IsUsing());
+		TestEqual(TEXT("OnThrown delivered once"), Item->ThrownCount, 1);
+		TestTrue(TEXT("Reaction receives actual body mass"), FMath::IsNearlyEqual(Item->LastThrow.MassKg, Mass, 0.01f));
+		TestEqual(TEXT("Reaction identifies thrower"), Item->LastThrow.Thrower.Get(), F.Player);
+		TestEqual(TEXT("Release classified as Throw"), Item->Carryable->LastReleaseReason, ECarryReleaseReason::Throw);
+		F.Tick(0.02f);
+		F.Tick(0.02f);
+		// 기본 힘 4배에서도 속도 상한에 걸리지 않는 질량으로 J/m 비율을 검증한다.
+		const float ExpectedSpeedCm = 4800.f / Mass;
+		TestTrue(TEXT("Engine impulse respects mass (cm/s)"), FMath::IsNearlyEqual(
+			static_cast<float>(Item->Mesh->GetPhysicsLinearVelocity().X), ExpectedSpeedCm, 2.f));
+		F.ItemUse->EndUseInput();
+		TestEqual(TEXT("Input release does not throw again"), Item->ThrownCount, 1);
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FItemDropReasonTest, "HundredButtons.ItemUse.DropAndFailedThrowDoNotReact",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FItemDropReasonTest::RunTest(const FString& Parameters)
+{
+	InteractionTests::FWorldFixture F;
+	AItemUseTestPickupActor* Item = F.Spawn<AItemUseTestPickupActor>(FVector(180, 0, 0));
+	F.Interaction->TryInteract();
+	F.Carry->TryDrop();
+	TestEqual(TEXT("G drop is classified separately"), Item->Carryable->LastReleaseReason, ECarryReleaseReason::Drop);
+	TestEqual(TEXT("G drop does not arm a thrown reaction"), Item->ThrownCount, 0);
+	F.Interaction->TryInteract();
+	UThrowItemUseBehavior* Throw = Cast<UThrowItemUseBehavior>(Item->UseBehavior);
+	Throw->ThrowSettings.ImpulseNewtonSeconds = 0.f;
+	TestFalse(TEXT("Invalid throw settings reject use"), F.ItemUse->BeginUseInput().bSucceeded);
+	TestTrue(TEXT("Failed throw retains held item"), F.Carry->IsHolding());
+	TestEqual(TEXT("Failed throw does not call OnThrown"), Item->ThrownCount, 0);
+	F.Carry->ForceRelease();
+	TestEqual(TEXT("Forced release is classified separately"), Item->Carryable->LastReleaseReason, ECarryReleaseReason::Forced);
+	TestEqual(TEXT("Forced release does not arm reaction"), Item->ThrownCount, 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FItemThrowStableLaunchTest, "HundredButtons.ItemUse.StableLaunchAfterCameraMotion",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FItemThrowStableLaunchTest::RunTest(const FString& Parameters)
+{
+	const FVector Directions[] = {FVector::ForwardVector, FVector::UpVector,
+		FVector(1, 0, 1).GetSafeNormal(), FVector::RightVector};
+	for (const FVector& Direction : Directions)
+	{
+		for (const FVector CarryVelocity : {FVector::ZeroVector, -Direction * 900.f, FVector(1800, -1200, -900)})
+		{
+			InteractionTests::FWorldFixture F;
+			AItemUseTestPickupActor* Item = F.Spawn<AItemUseTestPickupActor>(FVector(180, 0, 0));
+			Item->Mesh->SetMassOverrideInKg(NAME_None, 2.f, true);
+			Item->Mesh->SetEnableGravity(false);
+			Item->Mesh->SetLinearDamping(0.f);
+			Item->Mesh->SetAngularDamping(0.f);
+			FInteractionContext GrabContext;
+			GrabContext.Interactor = F.Player;
+			F.Carry->TryGrab(Item->Carryable, GrabContext);
+			F.Player->SetActorRotation(Direction.Rotation());
+			// 물리 핸들이 빠른 시점 이동을 따라오며 만든 운동을 재현한다.
+			Item->Mesh->SetPhysicsLinearVelocity(CarryVelocity);
+			Item->Mesh->SetPhysicsAngularVelocityInRadians(FVector(20, -30, 40));
+			TestTrue(TEXT("Throw succeeds at every camera pitch"), F.ItemUse->BeginUseInput().bSucceeded);
+			F.Tick(0.02f);
+			F.Tick(0.02f);
+			TestTrue(TEXT("Launch ignores carry velocity and follows current aim"),
+				Item->Mesh->GetPhysicsLinearVelocity().Equals(Direction * 1800.f, 2.f));
+			TestTrue(TEXT("Carry rotation does not create unwanted launch spin"),
+				Item->Mesh->GetPhysicsAngularVelocityInRadians().IsNearlyZero(0.01));
+			TestEqual(TEXT("Stable launch notifies item once"), Item->ThrownCount, 1);
+		}
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FItemThrowStartOverlapTest, "HundredButtons.ItemUse.ThrowStartOverlapSafety",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FItemThrowStartOverlapTest::RunTest(const FString& Parameters)
+{
+	for (int32 Case = 0; Case < 4; ++Case)
+	{
+		InteractionTests::FWorldFixture F;
+		AItemUseTestPickupActor* Item = F.Spawn<AItemUseTestPickupActor>(FVector(180, 0, 0));
+		if (Case == 3)
+		{
+			Item->Mesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
+		}
+		F.Interaction->TryInteract();
+		// 실제 플레이어와의 겹침도 검사하도록 Pawn 유형은 사용 주체에 부착한다.
+		AActor* Blocker = (Case == 1 || Case == 3) ? F.Player : F.Spawn<AActor>(FVector::ZeroVector);
+		UBoxComponent* Box = NewObject<UBoxComponent>(Blocker);
+		Blocker->AddInstanceComponent(Box);
+		Box->SetBoxExtent(FVector(8.f));
+		Box->SetCollisionEnabled(Case == 2 ? ECollisionEnabled::QueryOnly : ECollisionEnabled::QueryAndPhysics);
+		Box->SetCollisionObjectType((Case == 1 || Case == 3) ? ECC_Pawn : ECC_WorldStatic);
+		Box->SetCollisionResponseToAllChannels(ECR_Block);
+		Box->RegisterComponent();
+		Box->SetWorldLocation(Item->Mesh->GetComponentLocation());
+		// 접촉 중인 물건도 클릭 한 번으로 발사한다. 몸 충돌은 해제 후에 별도로 복원한다.
+		TestTrue(TEXT("Contact does not swallow the throw click"), F.ItemUse->BeginUseInput().bSucceeded);
+		TestFalse(TEXT("Click releases the held item"), F.Carry->IsHolding());
+		TestEqual(TEXT("One click produces one thrown reaction"), Item->ThrownCount, 1);
+		TestEqual(TEXT("Pawn collision stays ignored during launch grace"),
+			Item->Mesh->GetCollisionResponseToChannel(ECC_Pawn), ECR_Ignore);
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FItemDropMomentumTest, "HundredButtons.ItemUse.DropKeepsExistingMomentum",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FItemDropMomentumTest::RunTest(const FString& Parameters)
+{
+	InteractionTests::FWorldFixture F;
+	AItemUseTestPickupActor* Item = F.Spawn<AItemUseTestPickupActor>(FVector(180, 0, 0));
+	Item->Mesh->SetEnableGravity(false);
+	Item->Mesh->SetLinearDamping(0.f);
+	F.Interaction->TryInteract();
+	const FVector ExistingVelocity(100, 200, -50);
+	Item->Mesh->SetPhysicsLinearVelocity(ExistingVelocity);
+	F.Carry->TryDrop();
+	F.Tick(0.02f);
+	F.Tick(0.02f);
+	// 발사 안정화를 위해 넣은 초기화가 일반 G 내려놓기의 움직임까지 바꾸지 않도록 한다.
+	TestTrue(TEXT("G drop preserves ordinary momentum"), Item->Mesh->GetPhysicsLinearVelocity().Equals(ExistingVelocity, 1.f));
+	TestEqual(TEXT("G drop still has no thrown reaction"), Item->ThrownCount, 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FItemRestingThrowTest, "HundredButtons.ItemUse.RestingContactAllowsThrow",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FItemRestingThrowTest::RunTest(const FString& Parameters)
+{
+	InteractionTests::FWorldFixture F;
+	AItemUseTestPickupActor* Item = F.Spawn<AItemUseTestPickupActor>(FVector(180, 0, 0));
+	Item->Mesh->SetMassOverrideInKg(NAME_None, 2.f, true);
+	Item->Mesh->SetEnableGravity(false);
+	F.Interaction->TryInteract();
+	AActor* Floor = F.Spawn<AActor>(FVector::ZeroVector);
+	UBoxComponent* Box = NewObject<UBoxComponent>(Floor);
+	Floor->AddInstanceComponent(Box);
+	Box->SetBoxExtent(FVector(100.f, 100.f, 8.f));
+	Box->SetCollisionProfileName(TEXT("BlockAll"));
+	Box->RegisterComponent();
+	// 접촉 오차 수준인 0.2cm 겹침을 재현한다. 이전에는 이것만으로 발사 전체가 취소됐다.
+	const FVector BodyBottom = Item->Mesh->Bounds.Origin - FVector(0, 0, Item->Mesh->Bounds.BoxExtent.Z);
+	Box->SetWorldLocation(BodyBottom - FVector(0, 0, 7.8f));
+	TestTrue(TEXT("Single click throws an item touching the floor"), F.ItemUse->BeginUseInput().bSucceeded);
+	TestFalse(TEXT("Floor contact no longer leaves item stuck in hand"), F.Carry->IsHolding());
+	TestEqual(TEXT("Floor contact still emits exactly one reaction"), Item->ThrownCount, 1);
+	TestEqual(TEXT("World collision is still enabled after launch"),
+		Item->Mesh->GetCollisionResponseToChannel(ECC_WorldStatic), ECR_Block);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FItemPawnRestoreLifecycleTest, "HundredButtons.ItemUse.ThrownPawnCollisionLifecycle",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FItemPawnRestoreLifecycleTest::RunTest(const FString& Parameters)
+{
+	{
+		InteractionTests::FWorldFixture F;
+		AItemUseTestPickupActor* Item = F.Spawn<AItemUseTestPickupActor>(FVector(180, 0, 0));
+		Item->Mesh->SetEnableGravity(false);
+		F.Interaction->TryInteract();
+		UBoxComponent* PawnBox = NewObject<UBoxComponent>(F.Player);
+		F.Player->AddInstanceComponent(PawnBox);
+		PawnBox->SetBoxExtent(FVector(5000.f));
+		PawnBox->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+		PawnBox->SetCollisionObjectType(ECC_Pawn);
+		PawnBox->SetCollisionResponseToAllChannels(ECR_Block);
+		PawnBox->RegisterComponent();
+		PawnBox->SetWorldLocation(Item->GetActorLocation());
+		F.ItemUse->BeginUseInput();
+		F.Tick(0.25f);
+		TestEqual(TEXT("Collision is not restored while inside the thrower"),
+			Item->Mesh->GetCollisionResponseToChannel(ECC_Pawn), ECR_Ignore);
+		PawnBox->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		F.Tick(0.06f);
+		TestEqual(TEXT("Collision restores after separation"),
+			Item->Mesh->GetCollisionResponseToChannel(ECC_Pawn), ECR_Block);
+	}
+	{
+		InteractionTests::FWorldFixture F;
+		AItemUseTestPickupActor* Item = F.Spawn<AItemUseTestPickupActor>(FVector(180, 0, 0));
+		Item->Mesh->SetEnableGravity(false);
+		F.Interaction->TryInteract();
+		F.ItemUse->BeginUseInput();
+		F.ItemUse->EndUseInput();
+		F.Interaction->TryInteract();
+		TestTrue(TEXT("Thrown item can be grabbed again immediately"), F.Carry->IsHolding());
+		F.Tick(0.3f);
+		TestEqual(TEXT("Old timer does not restore collision during re-grab"),
+			Item->Mesh->GetCollisionResponseToChannel(ECC_Pawn), ECR_Ignore);
+		F.Carry->TryDrop();
+		TestEqual(TEXT("Re-grab remembers original response for G drop"),
+			Item->Mesh->GetCollisionResponseToChannel(ECC_Pawn), ECR_Block);
+	}
+	{
+		InteractionTests::FWorldFixture F;
+		AItemUseTestPickupActor* Item = F.Spawn<AItemUseTestPickupActor>(FVector(180, 0, 0));
+		F.Interaction->TryInteract();
+		F.ItemUse->BeginUseInput();
+		F.Player->Destroy();
+		TestEqual(TEXT("Carrier destruction restores thrown object collision"),
+			Item->Mesh->GetCollisionResponseToChannel(ECC_Pawn), ECR_Block);
+	}
+	{
+		InteractionTests::FWorldFixture F;
+		AItemUseTestPickupActor* Item = F.Spawn<AItemUseTestPickupActor>(FVector(180, 0, 0));
+		F.Interaction->TryInteract();
+		F.ItemUse->BeginUseInput();
+		Item->Mesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
+		F.Tick(0.3f);
+		TestEqual(TEXT("Explicit item collision changes are not overwritten"),
+			Item->Mesh->GetCollisionResponseToChannel(ECC_Pawn), ECR_Overlap);
+		Item->Destroy();
+		F.Tick(0.1f);
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPlacedItemThrowTest, "HundredButtons.ItemUse.PlacedItemConfiguration",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FPlacedItemThrowTest::RunTest(const FString& Parameters)
+{
+	// 테스트 전용 질량만 검사하지 않고 실제 맵의 외부 액터 설정을 읽어 복제한다.
+	// 패키지는 읽기만 하며 맵·아이템 에셋을 저장하거나 수정하지 않는다.
+	TArray<FString> Files;
+	IFileManager::Get().FindFilesRecursive(Files, *(FPaths::ProjectContentDir() / TEXT("__ExternalActors__/FirstPerson/Lvl_FirstPerson")),
+		TEXT("*.uasset"), true, false);
+	for (const FString& File : Files)
+	{
+		FString PackageName;
+		if (FPackageName::TryConvertFilenameToLongPackageName(File, PackageName))
+		{
+			LoadPackage(nullptr, *PackageName, LOAD_None);
+		}
+	}
+	TArray<APickupActor*> PlacedItems;
+	for (TObjectIterator<APickupActor> It; It; ++It)
+	{
+		if (!It->IsTemplate() && It->GetExternalPackage())
+		{
+			PlacedItems.Add(*It);
+		}
+	}
+	for (APickupActor* Template : PlacedItems)
+	{
+		InteractionTests::FWorldFixture F;
+		Template->GetRootComponent()->UpdateComponentToWorld();
+		FTransform Transform = Template->GetActorTransform();
+		Transform.SetLocation(FVector(180, 0, 0));
+		FActorSpawnParameters Params;
+		Params.Template = Template;
+		// 배치된 크기를 그대로 사용한다. 기본 MultiplyWithRoot는 크기를 한 번 더 곱한다.
+		Params.TransformScaleMethod = ESpawnActorScaleMethod::OverrideRootScale;
+		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		APickupActor* Item = Cast<APickupActor>(F.World->SpawnActor(Template->GetClass(), &Transform, Params));
+		if (!TestNotNull(TEXT("Placed item can be cloned for inspection"), Item))
+		{
+			continue;
+		}
+		UThrowItemUseBehavior* Throw = Cast<UThrowItemUseBehavior>(Item->UseBehavior);
+		AddInfo(FString::Printf(TEXT("PLACED_ITEM %s class=%s scale=%s mass=%.3fkg behavior=%s"),
+			*Template->GetName(), *Template->GetClass()->GetName(), *Item->GetActorScale3D().ToString(),
+			Item->Mesh->GetMass(), *GetNameSafe(Item->UseBehavior)));
+		if (!Throw)
+		{
+			continue;
+		}
+		FInteractionContext Context;
+		Context.Interactor = F.Player;
+		Item->Mesh->SetEnableGravity(false);
+		Item->Mesh->SetLinearDamping(0.f);
+		TestTrue(TEXT("Placed throwing item can be grabbed"), F.Carry->TryGrab(Item->Carryable, Context));
+		TestTrue(TEXT("Placed throwing item accepts one click"), F.ItemUse->BeginUseInput().bSucceeded);
+		F.Tick(0.02f);
+		F.Tick(0.02f);
+		AddInfo(FString::Printf(TEXT("PLACED_THROW baseImpulse=%.3fNs strength=%.2f appliedImpulse=%.3fNs velocity=%.3fm/s"),
+			Throw->ThrowSettings.ImpulseNewtonSeconds, F.Carry->ThrowStrengthMultiplier,
+			Throw->ThrowSettings.ImpulseNewtonSeconds * F.Carry->ThrowStrengthMultiplier,
+			Item->Mesh->GetPhysicsLinearVelocity().Size() / 100.0));
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSettledHeldThrowTest, "HundredButtons.ItemUse.SettledHeldItemLaunch",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FSettledHeldThrowTest::RunTest(const FString& Parameters)
+{
+	InteractionTests::FWorldFixture F;
+	AItemUseTestPickupActor* Item = F.Spawn<AItemUseTestPickupActor>(FVector(180, 0, 0));
+	F.Interaction->TryInteract();
+	// 실제 플레이처럼 중력을 켠 채 한동안 들고 난 뒤 발사한다.
+	for (int32 Frame = 0; Frame < 60; ++Frame)
+	{
+		F.Tick(1.f / 60.f);
+	}
+	const FVector BeforeLocation = Item->GetActorLocation();
+	AddInfo(FString::Printf(TEXT("SETTLED_THROW mass=%.3fkg location=%s velocity=%s"),
+		Item->Mesh->GetMass(), *BeforeLocation.ToString(), *Item->Mesh->GetPhysicsLinearVelocity().ToString()));
+	TestTrue(TEXT("Settled held item still accepts use"), F.ItemUse->BeginUseInput().bSucceeded);
+	F.Tick(0.02f);
+	F.Tick(0.02f);
+	AddInfo(FString::Printf(TEXT("SETTLED_LAUNCH velocity=%s"), *Item->Mesh->GetPhysicsLinearVelocity().ToString()));
+	TestTrue(TEXT("Physics handle no longer restrains launched item"), Item->GetActorLocation().X > BeforeLocation.X);
+	// 질량을 임의로 줄이지 않은 기본 아이템도 '내려놓기'와 구별되는 발사 속도가 필요하다.
+	TestTrue(TEXT("Default real-mass item launches at a useful speed"), Item->Mesh->GetPhysicsLinearVelocity().X >= 500.f);
 	return true;
 }
 

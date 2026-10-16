@@ -7,6 +7,7 @@
 #include "Interaction/InteractionComponent.h"
 #include "Interaction/Interactable.h"
 #include "Interaction/CarryComponent.h"
+#include "Interaction/ItemUseComponent.h"
 #include "Interaction/InteractionPromptWidget.h"
 #include "Interaction/InteractionView.h"
 #include "Engine/World.h"
@@ -26,6 +27,11 @@ void UInteractionComponent::BeginPlay()
 	Super::BeginPlay();
 	// 운반 상태는 CarryComponent에서 조회하고 변경 이벤트로 탐색을 켜거나 끈다.
 	Carry = GetOwner()->FindComponentByClass<UCarryComponent>();
+	ItemUse = GetOwner()->FindComponentByClass<UItemUseComponent>();
+	if (ItemUse)
+	{
+		ItemUse->OnUseStateChanged.AddDynamic(this, &UInteractionComponent::HandleUseStateChanged);
+	}
 	if (Carry)
 	{
 		Carry->OnCarryStateChanged.AddDynamic(this, &UInteractionComponent::HandleCarryStateChanged);
@@ -37,6 +43,10 @@ void UInteractionComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	// 종료 후 타이머·이벤트가 이 컴포넌트를 다시 호출하지 않도록 해제한다.
 	GetWorld()->GetTimerManager().ClearTimer(TraceTimer);
+	if (ItemUse)
+	{
+		ItemUse->OnUseStateChanged.RemoveDynamic(this, &UInteractionComponent::HandleUseStateChanged);
+	}
 	if (Carry)
 	{
 		Carry->OnCarryStateChanged.RemoveDynamic(this, &UInteractionComponent::HandleCarryStateChanged);
@@ -121,10 +131,13 @@ void UInteractionComponent::RefreshTarget()
 		SetPrompt(FText::GetEmpty(), false);
 		return;
 	}
-	// 운반 중에는 대상별 E 안내 대신 G 내려놓기 안내만 표시한다.
+	// 운반 중 E는 계속 차단하되, 아이템에 설정된 사용 동작과 G 내려놓기 안내를 표시한다.
 	if (Carry && Carry->IsHolding())
 	{
-		SetPrompt(FText::Format(NSLOCTEXT("Interaction", "DropHint", "[{0}] 내려놓기"), DropInputLabel), true);
+		const FText DropPrompt = FText::Format(NSLOCTEXT("Interaction", "DropHint", "[{0}] 내려놓기"), DropInputLabel);
+		const FText UsePrompt = ItemUse ? ItemUse->GetUsePrompt() : FText::GetEmpty();
+		SetPrompt(UsePrompt.IsEmpty() ? DropPrompt
+			: FText::Format(NSLOCTEXT("ItemUse", "UseAndDropHint", "[{0}] {1}   ·   {2}"), UseInputLabel, UsePrompt, DropPrompt), true);
 		return;
 	}
 	FInteractionContext Context;
@@ -140,6 +153,11 @@ void UInteractionComponent::RefreshTarget()
 	const bool bAvailable = IsValid(Target) && IInteractable::Execute_CanInteract(Target, Context);
 	SetPrompt(bAvailable ? FText::Format(NSLOCTEXT("Interaction", "InteractHint", "[{0}] {1}"), InteractInputLabel, Info.Prompt)
 		: Info.UnavailableReason, bAvailable);
+}
+
+void UInteractionComponent::HandleUseStateChanged()
+{
+	RefreshTarget();
 }
 
 void UInteractionComponent::SetPrompt(const FText& Prompt, bool bAvailable)
