@@ -6,7 +6,9 @@
 
 - E: 현재 바라보는 대상에 상호작용 요청. 운반 중에는 전부 차단.
 - G: 현재 운반 중인 물건 내려놓기. 빈손이면 아무 동작 없음.
-- 대상 검사: 기본 300cm, 0.2초 간격 Visibility Line Trace. E 입력 시 즉시 재검사.
+- 대상 검사: 기본 거리 300cm, 반경 10cm, 0.2초 간격 Visibility Sphere Trace. E 입력 시 즉시 재검사. 최초 차단 충돌만 사용하므로 벽 뒤의 물건은 선택하지 않는다.
+- 캐릭터의 InteractionComponent에서 Interaction / Trace / Trace Radius로 감지 반경을 조절한다. EditAnywhere, BlueprintReadWrite로 노출한다.
+- Interaction / Debug / Draw Debug Trace를 켜면 DrawDebug 함수로 스피어가 지나가는 부피(캡슐), 충돌 시 스피어와 실제 접촉점을 표시한다. 녹색은 상호작용 액터 감지, 빨간색은 대상 없음 또는 일반 장애물, 노란 점은 접촉점이다. 사용 가능 여부와 별개로 대상 종류만 색으로 구분한다. 기본값은 꺼짐이며 EditAnywhere, BlueprintReadWrite로 런타임 토글도 가능하다. 표시는 탐색 주기 동안 잠시 남고, 운반 중 탐색이 멈추면 사라진다.
 - 안내: 화면 높이 43% 위치. 사용 가능하면 `[E] 잡기` 또는 `[E] 누르기`, 운반 중에는 `[G] 내려놓기`.
 - 기본 키는 캐릭터 BP의 Input / Interaction에서 바꿀 수 있다. 안내의 키 이름도 함께 변경된다.
 

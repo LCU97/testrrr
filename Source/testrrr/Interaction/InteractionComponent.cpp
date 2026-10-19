@@ -14,6 +14,7 @@
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
 #include "TimerManager.h"
+#include "DrawDebugHelpers.h"
 
 UInteractionComponent::UInteractionComponent()
 {
@@ -78,11 +79,31 @@ bool UInteractionComponent::FindTarget(FInteractionContext& OutContext) const
 	// 자기 자신은 무시하고 실제 카메라 중앙 방향으로 단순 충돌을 검사한다.
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(InteractionTrace), false, GetOwner());
 	// 첫 번째 가로막는 충돌만 사용하므로 일반 벽 뒤의 상호작용 대상으로 넘어가지 않는다.
-	const bool bHit = GetWorld()->LineTraceSingleByChannel(OutContext.Hit, ViewLocation,
-		ViewLocation + ViewRotation.Vector() * InteractionDistance, TraceChannel, Params);
+	const FVector TraceEnd = ViewLocation + ViewRotation.Vector() * FMath::Max(1.f, InteractionDistance);
+	const float Radius = FMath::Max(0.1f, TraceRadius);
+	const bool bHit = GetWorld()->SweepSingleByChannel(OutContext.Hit, ViewLocation, TraceEnd,
+		FQuat::Identity, TraceChannel, FCollisionShape::MakeSphere(Radius), Params);
 	AActor* Target = OutContext.Hit.GetActor();
 	// 메쉬 이름으로 종류를 판별하지 않고, 맞은 액터가 공통 계약을 지원하는지 확인한다.
-	return bHit && IsValid(Target) && Target->GetClass()->ImplementsInterface(UInteractable::StaticClass());
+	const bool bFoundTarget = bHit && IsValid(Target) && Target->GetClass()->ImplementsInterface(UInteractable::StaticClass());
+#if ENABLE_DRAW_DEBUG
+	if (bDrawDebugTrace)
+	{
+		const FColor Color = bFoundTarget ? FColor::Green : FColor::Red;
+		// 스피어가 지나간 전체 부피를 캡슐로 표시한다. Hit.Location은 충돌 시 구 중심이다.
+		const FVector Path = TraceEnd - ViewLocation;
+		const float Lifetime = FMath::Max(0.01f, TraceInterval) + 0.02f;
+		DrawDebugCapsule(GetWorld(), (ViewLocation + TraceEnd) * 0.5f,
+			Path.Size() * 0.5f + Radius, Radius,
+			FQuat::FindBetweenNormals(FVector::UpVector, Path.GetSafeNormal()), Color, false, Lifetime, 0, 0.8f);
+		if (bHit)
+		{
+			DrawDebugSphere(GetWorld(), OutContext.Hit.Location, Radius, 16, Color, false, Lifetime);
+			DrawDebugPoint(GetWorld(), OutContext.Hit.ImpactPoint, 10.f, FColor::Yellow, false, Lifetime);
+		}
+	}
+#endif
+	return bFoundTarget;
 }
 
 FInteractionResult UInteractionComponent::TryInteract()

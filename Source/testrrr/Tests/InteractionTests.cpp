@@ -154,6 +154,34 @@ bool FInteractionOcclusionTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FInteractionSphereTraceTest, "HundredButtons.Interaction.SphereTraceToleranceAndOcclusion",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FInteractionSphereTraceTest::RunTest(const FString& Parameters)
+{
+	InteractionTests::FWorldFixture F;
+	// 버튼 반폭은 25cm. 중심선에서 32cm 떨어져 라인은 빗나가지만 반경 10cm는 닿는다.
+	AToggleSwitchActor* Target = F.Spawn<AToggleSwitchActor>(FVector(200, 32, 0));
+	F.Interaction->TraceRadius = 2.f;
+	TestFalse(TEXT("Narrow sweep misses an off-axis button"), F.Interaction->TryInteract().bSucceeded);
+	F.Interaction->TraceRadius = 10.f;
+	F.Interaction->bDrawDebugTrace = true;
+	TestTrue(TEXT("Sphere accepts a slightly off-axis button with debug enabled"), F.Interaction->TryInteract().bSucceeded);
+	TestTrue(TEXT("Off-axis target activated"), Target->bIsOn);
+	F.Interaction->bDrawDebugTrace = false;
+	AActor* Wall = F.Spawn<AActor>(FVector(100, 0, 0));
+	UBoxComponent* Box = NewObject<UBoxComponent>(Wall);
+	Wall->SetRootComponent(Box);
+	Box->SetBoxExtent(FVector(10, 100, 100));
+	Box->SetCollisionProfileName(TEXT("BlockAll"));
+	Box->RegisterComponent();
+	Box->SetWorldLocation(FVector(100, 0, 0));
+	F.Tick(0.25f);
+	TestNull(TEXT("Sphere cannot focus through a wall"), F.Interaction->GetFocusedActor());
+	TestFalse(TEXT("Wall still blocks E after cooldown"), F.Interaction->TryInteract().bSucceeded);
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FInteractionCarryTest, "HundredButtons.Interaction.CarryDropAndDestruction",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 

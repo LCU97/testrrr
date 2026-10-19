@@ -1,6 +1,6 @@
 /*
  * 플레이어의 대상 탐색과 상호작용 요청
- * 0.2초 간격 Line Trace, 운반 중 E 차단, 공통 인터페이스 호출, 화면 안내를 담당한다.
+ * 0.2초 간격 Sphere Trace, 운반 중 E 차단, 공통 인터페이스 호출, 화면 안내를 담당한다.
  * 개별 아이템·스위치의 기능은 이 컴포넌트에 추가하지 않고 대상 액터에서 구현한다.
  */
 
@@ -37,6 +37,14 @@ public:
 	// 카메라에서 앞으로 검사할 최대 거리이며 단위는 cm다.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Interaction", meta=(ClampMin="1", Units="cm"))
 	float InteractionDistance = 300.f;
+
+	// 조준선 주변의 감지 반경. 작은 버튼도 조금 여유 있게 선택한다.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Interaction|Trace", meta=(ClampMin="0.1", Units="cm"))
+	float TraceRadius = 10.f;
+
+	// 실제 탐색할 때만 표시한다. 운반 중에는 탐색과 디버그 표시가 함께 멈춘다.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Interaction|Debug")
+	bool bDrawDebugTrace = false;
 
 	// 상호작용 대상뿐 아니라 벽도 이 채널을 막아야 벽 뒤 대상을 선택하지 않는다.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Interaction")
