@@ -27,7 +27,7 @@ public class testrrr : ModuleRules
 		});
 
 		// 기본 안내 위젯에서 사용하는 글꼴과 Slate 색상 타입의 링크 의존성이다.
-		PrivateDependencyModuleNames.AddRange(new string[] { "SlateCore" });
+		PrivateDependencyModuleNames.AddRange(new string[] { "SlateCore", "PhysicsCore" });
 
 		PublicIncludePaths.AddRange(new string[] {
 			"testrrr",

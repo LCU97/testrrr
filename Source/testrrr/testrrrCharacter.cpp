@@ -60,6 +60,14 @@ AtestrrrCharacter::AtestrrrCharacter()
 	// Configure character movement
 	GetCharacterMovement()->BrakingDecelerationFalling = 1500.0f;
 	GetCharacterMovement()->AirControl = 0.5f;
+	// 기본 750000의 밀기 힘은 가벼운 공을 접촉만으로 날려 보낸다.
+	// 질량에 비례해 힘을 키우지 않아 무거운 볼링공이 더 버티도록 한다.
+	GetCharacterMovement()->InitialPushForceFactor = 100.f;
+	GetCharacterMovement()->PushForceFactor = 3000.f;
+	GetCharacterMovement()->TouchForceFactor = 0.2f;
+	GetCharacterMovement()->RepulsionForce = 0.2f;
+	GetCharacterMovement()->bPushForceScaledToMass = false;
+	GetCharacterMovement()->bTouchForceScaledToMass = false;
 }
 
 void AtestrrrCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -86,14 +94,21 @@ void AtestrrrCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCo
 			UseItemAction->ValueType = EInputActionValueType::Boolean;
 		}
 		// 사용 동작은 액터가 선택하며, 입력 계층은 사용 요청과 키 배정만 관리한다.
+		if (!RotateItemAction)
+		{
+			RotateItemAction = NewObject<UInputAction>(this, TEXT("IA_RotateItem"));
+			RotateItemAction->ValueType = EInputActionValueType::Boolean;
+		}
 		InteractionMappingContext = NewObject<UInputMappingContext>(this);
 		InteractionMappingContext->MapKey(InteractAction, InteractKey);
 		InteractionMappingContext->MapKey(DropAction, DropKey);
 		InteractionMappingContext->MapKey(UseItemAction, UseItemKey);
+		InteractionMappingContext->MapKey(RotateItemAction, RotateItemKey);
 		// 실제 키 배정과 화면에 표시하는 키 이름이 일치하도록 맞춘다.
 		InteractionComponent->InteractInputLabel = InteractKey.GetDisplayName();
 		InteractionComponent->DropInputLabel = DropKey.GetDisplayName();
 		InteractionComponent->UseInputLabel = UseItemKey.GetDisplayName();
+		InteractionComponent->RotateInputLabel = RotateItemKey.GetDisplayName();
 		if (APlayerController* PC = Cast<APlayerController>(GetController()))
 		{
 			if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer()))
@@ -106,6 +121,8 @@ void AtestrrrCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCo
 		// Started를 사용하여 키를 누른 한 번에 한 번만 요청한다. 누르는 동안 반복하지 않는다.
 		EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Started, this, &AtestrrrCharacter::DoInteract);
 		EnhancedInputComponent->BindAction(DropAction, ETriggerEvent::Started, this, &AtestrrrCharacter::DoDrop);
+		// 누르는 동안 매 프레임 회전하고, 놓으면 더 이상 회전 요청을 보내지 않는다.
+		EnhancedInputComponent->BindAction(RotateItemAction, ETriggerEvent::Triggered, this, &AtestrrrCharacter::DoRotateItem);
 		// 단발·지속 동작이 같은 액션을 사용한다. 지속 갱신은 사용 세션의 Tick이 담당한다.
 		EnhancedInputComponent->BindAction(UseItemAction, ETriggerEvent::Started, this, &AtestrrrCharacter::DoBeginUseItem);
 		EnhancedInputComponent->BindAction(UseItemAction, ETriggerEvent::Completed, this, &AtestrrrCharacter::DoEndUseItem);
@@ -138,6 +155,11 @@ void AtestrrrCharacter::DoDrop()
 {
 	// 일반 내려놓기 요청이므로 물건별 CanDrop 조건을 적용한다.
 	CarryComponent->TryDrop();
+}
+
+void AtestrrrCharacter::DoRotateItem()
+{
+	CarryComponent->TryRotateHeldObject(GetWorld()->GetDeltaSeconds());
 }
 
 void AtestrrrCharacter::RemoveInteractionMapping()

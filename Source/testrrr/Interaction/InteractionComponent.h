@@ -25,6 +25,9 @@ class TESTRRR_API UInteractionComponent : public UActorComponent
 	GENERATED_BODY()
 
 public:
+	UPROPERTY(EditAnywhere, Category="Interaction")
+	FText RotateInputLabel = FText::FromString(TEXT("R"));
+
 	UInteractionComponent();
 
 	// 안내용 탐색 주기. E를 누른 순간의 재검사는 이 타이머를 기다리지 않는다.

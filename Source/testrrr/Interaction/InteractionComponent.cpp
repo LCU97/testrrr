@@ -134,7 +134,11 @@ void UInteractionComponent::RefreshTarget()
 	// 운반 중 E는 계속 차단하되, 아이템에 설정된 사용 동작과 G 내려놓기 안내를 표시한다.
 	if (Carry && Carry->IsHolding())
 	{
-		const FText DropPrompt = FText::Format(NSLOCTEXT("Interaction", "DropHint", "[{0}] 내려놓기"), DropInputLabel);
+		FText DropPrompt = FText::Format(NSLOCTEXT("Interaction", "DropHint", "[{0}] 내려놓기"), DropInputLabel);
+		if (Carry->CanRotateHeldObject())
+		{
+			DropPrompt = FText::Format(NSLOCTEXT("Interaction", "RotateAndDropHint", "[{0}] 수평 회전   ·   {1}"), RotateInputLabel, DropPrompt);
+		}
 		const FText UsePrompt = ItemUse ? ItemUse->GetUsePrompt() : FText::GetEmpty();
 		SetPrompt(UsePrompt.IsEmpty() ? DropPrompt
 			: FText::Format(NSLOCTEXT("ItemUse", "UseAndDropHint", "[{0}] {1}   ·   {2}"), UseInputLabel, UsePrompt, DropPrompt), true);

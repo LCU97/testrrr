@@ -35,6 +35,14 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Carry")
 	bool bCanThrow = true;
 
+	// 배치용 아이템만 선택적으로 R 회전을 허용한다.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Carry")
+	bool bCanRotateWhileCarried = false;
+
+	// 블록은 시선을 위아래로 움직여도 수평 자세를 유지한다.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Carry")
+	bool bKeepUprightWhileCarried = false;
+
 	UFUNCTION(BlueprintPure, Category="Carry")
 	UPrimitiveComponent* GetCarryPrimitive() const;
 

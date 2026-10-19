@@ -65,6 +65,12 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Input|Interaction")
 	TObjectPtr<UInputAction> UseItemAction;
 
+	UPROPERTY(EditDefaultsOnly, Category="Input|Interaction")
+	TObjectPtr<UInputAction> RotateItemAction;
+
+	UPROPERTY(EditDefaultsOnly, Category="Input|Interaction")
+	FKey RotateItemKey = EKeys::R;
+
 	// BP 기본값에서 키를 변경하면 안내 문구의 키 이름도 함께 갱신된다.
 	UPROPERTY(EditDefaultsOnly, Category="Input|Interaction")
 	FKey InteractKey = EKeys::E;
@@ -127,6 +133,7 @@ protected:
 	// 입력 함수는 요청 전달만 담당하며, 개별 물건과 스위치의 종류를 구별하지 않는다.
 	void DoInteract();
 	void DoDrop();
+	void DoRotateItem();
 	void DoBeginUseItem();
 	void DoEndUseItem();
 	void DoCancelUseItem();

@@ -111,6 +111,7 @@ bool UCarryComponent::TryGrab(UCarryableComponent* Target, const FInteractionCon
 	HeldPrimitive = Body;
 	Target->CurrentCarrier = GetOwner();
 	RelativeHoldRotation = ViewRotation.Quaternion().Inverse() * Body->GetComponentQuat();
+	UprightHoldRotation = FRotator(0.f, Body->GetComponentRotation().Yaw, 0.f);
 	// 운반 중 플레이어와의 충돌은 무시하되, 벽·바닥과의 물리 충돌은 유지한다.
 	// 발사 직후 다시 잡았다면 임시 Ignore 대신 발사 전의 원래 응답을 이어받는다.
 	PreviousPawnResponse = TakePendingPawnResponse(Body);
@@ -123,6 +124,41 @@ bool UCarryComponent::TryGrab(UCarryableComponent* Target, const FInteractionCon
 	Target->OnGrabbed(Context);
 	OnCarryStateChanged.Broadcast();
 	return IsHolding();
+}
+
+bool UCarryComponent::CanRotateHeldObject() const
+{
+	return !bCarryTransition && IsHolding() && HeldCarryable->bCanRotateWhileCarried
+		&& IsValid(PhysicsHandle) && PhysicsHandle->GetGrabbedComponent() == HeldPrimitive.Get()
+		&& HeldPrimitive->IsSimulatingPhysics();
+}
+
+bool UCarryComponent::TryRotateHeldObject(float DeltaTime)
+{
+	if (!CanRotateHeldObject() || !FMath::IsFinite(DeltaTime) || DeltaTime <= 0.f)
+	{
+		return false;
+	}
+	FVector ViewLocation;
+	FRotator ViewRotation;
+	InteractionView::GetViewPoint(GetOwner(), ViewLocation, ViewRotation);
+	const float Step = FMath::Clamp(HeldRotationSpeed, 1.f, 360.f) * DeltaTime;
+	FQuat TargetRotation;
+	if (HeldCarryable->bKeepUprightWhileCarried)
+	{
+		UprightHoldRotation.Yaw = FRotator::NormalizeAxis(UprightHoldRotation.Yaw + Step);
+		TargetRotation = UprightHoldRotation.Quaternion();
+	}
+	else
+	{
+		// 월드의 수직축을 기준으로 회전한다. 카메라가 기울어져도 회전축은 수평이다.
+		TargetRotation = FQuat(FVector::UpVector, FMath::DegreesToRadians(Step))
+			* ViewRotation.Quaternion() * RelativeHoldRotation;
+		RelativeHoldRotation = ViewRotation.Quaternion().Inverse() * TargetRotation;
+	}
+	PhysicsHandle->SetTargetRotation(TargetRotation.Rotator());
+	HeldPrimitive->WakeAllRigidBodies();
+	return true;
 }
 
 bool UCarryComponent::TryDrop()
@@ -356,5 +392,6 @@ void UCarryComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActor
 	}
 	// 카메라 앞 목표 위치와 잡을 때의 상대 회전을 매 프레임 물리 핸들에 전달한다.
 	PhysicsHandle->SetTargetLocationAndRotation(ViewLocation + ViewRotation.Vector() * HoldDistance,
-		(ViewRotation.Quaternion() * RelativeHoldRotation).Rotator());
+		HeldCarryable->bKeepUprightWhileCarried ? UprightHoldRotation
+		: (ViewRotation.Quaternion() * RelativeHoldRotation).Rotator());
 }

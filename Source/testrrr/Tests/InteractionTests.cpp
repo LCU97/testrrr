@@ -21,6 +21,18 @@
 #include "Interaction/ThrowItemUseBehavior.h"
 #include "Interaction/ItemThrowPhysics.h"
 #include "Tests/ItemUseTestTypes.h"
+#include "GameplayActors/Items/WoodenBlockRectangle.h"
+#include "GameplayActors/Items/WoodenBlockTriangle.h"
+#include "GameplayActors/Items/BoxItem.h"
+#include "GameplayActors/Items/ChairItem.h"
+#include "GameplayActors/Items/BasketballItem.h"
+#include "GameplayActors/Items/BowlingBallItem.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "PhysicalMaterials/PhysicalMaterial.h"
+#include "GameplayActors/Switches/ItemSpawnSwitch.h"
+#include "Components/ArrowComponent.h"
+#include "PhysicsEngine/PhysicsHandleComponent.h"
+#include "PhysicsEngine/BodySetup.h"
 #include "HAL/FileManager.h"
 #include "Misc/PackageName.h"
 #include "UObject/UObjectIterator.h"
@@ -631,6 +643,166 @@ bool FSettledHeldThrowTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Physics handle no longer restrains launched item"), Item->GetActorLocation().X > BeforeLocation.X);
 	// 질량을 임의로 줄이지 않은 기본 아이템도 '내려놓기'와 구별되는 발사 속도가 필요하다.
 	TestTrue(TEXT("Default real-mass item launches at a useful speed"), Item->Mesh->GetPhysicsLinearVelocity().X >= 500.f);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPlacementItemsTest, "HundredButtons.Placement.ItemsAndHorizontalRotation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FPlacementItemsTest::RunTest(const FString& Parameters)
+{
+	InteractionTests::FWorldFixture F;
+	TestFalse(TEXT("Empty hand rotation is harmless"), F.Carry->TryRotateHeldObject(1.f / 60.f));
+	APlacementItem* Items[] = {
+		F.Spawn<AWoodenBlockRectangle>(FVector(180, 0, 0)),
+		F.Spawn<AWoodenBlockTriangle>(FVector(180, 300, 0)),
+		F.Spawn<AChairItem>(FVector(180, 600, 0)),
+		F.Spawn<ABoxItem>(FVector(180, 900, 0)) };
+	FInteractionContext Context;
+	Context.Interactor = F.Player;
+	for (APlacementItem* Item : Items)
+	{
+		TestNotNull(TEXT("Native item spawns"), Item);
+		if (!Item) { continue; }
+		TestTrue(TEXT("Simple collision exists"), Item->Mesh->GetBodySetup()
+			&& Item->Mesh->GetBodySetup()->AggGeom.GetElementCount() > 0);
+		TestTrue(TEXT("Item simulates physics"), Item->Mesh->IsSimulatingPhysics());
+		F.Player->SetActorLocation(Item->GetActorLocation() - FVector(180, 0, 0));
+		TestTrue(TEXT("Item can be picked up"), F.Carry->TryGrab(Item->Carryable, Context));
+		F.Player->SetActorRotation(FRotator(35, 0, 0));
+		TestFalse(TEXT("Zero elapsed time does not rotate"), F.Carry->TryRotateHeldObject(0.f));
+		for (int32 Frame = 0; Frame < 10; ++Frame)
+		{
+			TestTrue(TEXT("Holding R rotates each frame"), F.Carry->TryRotateHeldObject(1.f / 60.f));
+		}
+		FVector Location;
+		FRotator Rotation;
+		F.Player->FindComponentByClass<UPhysicsHandleComponent>()->GetTargetLocationAndRotation(Location, Rotation);
+		TestTrue(TEXT("Holding R for a sixth of a second rotates fifteen degrees"), FMath::IsNearlyEqual(Rotation.Yaw, 15.f, 0.1f));
+		TestTrue(TEXT("Looking up does not tip placement item"), FMath::IsNearlyZero(Rotation.Pitch, 0.1f)
+			&& FMath::IsNearlyZero(Rotation.Roll, 0.1f));
+		F.Carry->TryRotateHeldObject(1.f / 6.f);
+		F.Player->FindComponentByClass<UPhysicsHandleComponent>()->GetTargetLocationAndRotation(Location, Rotation);
+		TestTrue(TEXT("A single long frame rotates by the same amount"), FMath::IsNearlyEqual(Rotation.Yaw, 30.f, 0.1f));
+		F.Tick(1.f / 60.f);
+		F.Player->FindComponentByClass<UPhysicsHandleComponent>()->GetTargetLocationAndRotation(Location, Rotation);
+		TestTrue(TEXT("Without held-key requests rotation target stops"), FMath::IsNearlyEqual(Rotation.Yaw, 30.f, 0.1f));
+		TestTrue(TEXT("Item drops after rotation"), F.Carry->TryDrop());
+		F.Player->SetActorRotation(FRotator::ZeroRotator);
+	}
+	const FVector RectangleSize = Items[0]->Mesh->Bounds.BoxExtent * 2.f;
+	const FVector TriangleSize = Items[1]->Mesh->Bounds.BoxExtent * 2.f;
+	TestTrue(TEXT("Blocks share actual outer dimensions"), RectangleSize.Equals(TriangleSize, 0.1f));
+	TestTrue(TEXT("Block dimensions are 100x100x50 cm"), RectangleSize.Equals(FVector(100, 100, 50), 0.1f));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FItemSpawnSwitchTest, "HundredButtons.Placement.SpawnSwitch",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FItemSpawnSwitchTest::RunTest(const FString& Parameters)
+{
+	InteractionTests::FWorldFixture F;
+	AItemSpawnSwitch* Switch = F.Spawn<AItemSpawnSwitch>(FVector(0, 500, 0));
+	Switch->SetActorRotation(FRotator(0, 90, 0));
+	Switch->SpawnPoint->SetRelativeLocation(FVector(250, 0, 100));
+	Switch->SpawnClass = AWoodenBlockTriangle::StaticClass();
+	FInteractionContext Context;
+	Context.Interactor = F.Player;
+	TestTrue(TEXT("E spawns selected native class"), IInteractable::Execute_Interact(Switch, Context).bSucceeded);
+	AActor* First = Switch->LastSpawnedActor.Get();
+	TestNotNull(TEXT("Spawn result available"), First);
+	if (!First) { return false; }
+	TestTrue(TEXT("Selected item class used"), First->IsA<AWoodenBlockTriangle>());
+	TestTrue(TEXT("Spawn arrow position follows rotated switch"), First->GetActorLocation().Equals(Switch->SpawnPoint->GetComponentLocation(), 0.1f));
+	TestTrue(TEXT("Spawn arrow orientation used"), First->GetActorRotation().Equals(Switch->SpawnPoint->GetComponentRotation(), 0.1f));
+	TestFalse(TEXT("Cooldown prevents duplicate press"), IInteractable::Execute_Interact(Switch, Context).bSucceeded);
+	First->Destroy();
+	F.Tick(0.25f);
+	TestTrue(TEXT("Can spawn again after cooldown"), IInteractable::Execute_Interact(Switch, Context).bSucceeded);
+	Switch->SpawnClass = nullptr;
+	TestFalse(TEXT("Missing class safely rejected"), IInteractable::Execute_Interact(Switch, Context).bSucceeded);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBallItemsTest, "HundredButtons.Balls.ColorCarryThrowAndBounce",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FBallItemsTest::RunTest(const FString& Parameters)
+{
+	InteractionTests::FWorldFixture F;
+	ABasketballItem* Basketball = F.Spawn<ABasketballItem>(FVector(180, 0, 100));
+	ABowlingBallItem* Bowling = F.Spawn<ABowlingBallItem>(FVector(400, 100, 100));
+	TestTrue(TEXT("Basketball uses 0.9 kilogram mass"), FMath::IsNearlyEqual(Basketball->Mesh->GetMass(), 0.9f, 0.01f));
+	TestTrue(TEXT("Bowling ball uses thirty kilogram mass"), FMath::IsNearlyEqual(Bowling->Mesh->GetMass(), 30.f, 0.01f));
+	for (ABallItem* Ball : TArray<ABallItem*>{ Basketball, Bowling })
+	{
+		TestTrue(TEXT("Native sphere collision is available"), Ball->Mesh->GetBodySetup()->AggGeom.SphereElems.Num() > 0);
+		UMaterialInterface* Material = Ball->Mesh->GetMaterial(0);
+		FLinearColor Color;
+		TestTrue(TEXT("Material exposes the actual base color parameter"), Material && Material->GetVectorParameterValue(FMaterialParameterInfo(TEXT("Base Color")), Color));
+		TestTrue(TEXT("Visible material uses requested ball color"), Color.Equals(Ball->BallColor, 0.001f));
+	}
+	FInteractionContext Context;
+	Context.Interactor = F.Player;
+	TestFalse(TEXT("Bowling ball cannot be picked up"), F.Carry->TryGrab(Bowling->Carryable, Context));
+	TestFalse(TEXT("Bowling ball E interaction is unavailable"), IInteractable::Execute_CanInteract(Bowling, Context));
+	TestTrue(TEXT("Basketball can be picked up"), F.Carry->TryGrab(Basketball->Carryable, Context));
+	TestTrue(TEXT("Basketball uses existing left-click throw"), F.ItemUse->BeginUseInput().bSucceeded);
+	TestFalse(TEXT("Throw releases basketball"), F.Carry->IsHolding());
+	// Chaos의 임펄스는 다음 물리 스텝에서 속도에 반영된다.
+	F.Tick(0.02f);
+	TestTrue(TEXT("Throw applies forward velocity"), Basketball->Mesh->GetPhysicsLinearVelocity().X > 500.f);
+	Basketball->Destroy();
+	Bowling->Destroy();
+	// 동일한 바닥과 낙하 높이에서 실제 반발 차이를 확인한다.
+	AActor* Floor = F.World->SpawnActor<AActor>();
+	UBoxComponent* FloorBody = NewObject<UBoxComponent>(Floor);
+	Floor->SetRootComponent(FloorBody);
+	Floor->AddInstanceComponent(FloorBody);
+	FloorBody->SetBoxExtent(FVector(1000, 1000, 25));
+	FloorBody->SetCollisionProfileName(TEXT("BlockAll"));
+	FloorBody->RegisterComponent();
+	Floor->SetActorLocation(FVector(0, 0, -25));
+	Basketball = F.Spawn<ABasketballItem>(FVector(500, -100, 200));
+	Bowling = F.Spawn<ABowlingBallItem>(FVector(500, 100, 200));
+	float BasketballRebound = 0.f;
+	float BowlingRebound = 0.f;
+	for (int32 Frame = 0; Frame < 180; ++Frame)
+	{
+		F.Tick(1.f / 120.f);
+		if (Frame > 85)
+		{
+			BasketballRebound = FMath::Max(BasketballRebound, Basketball->GetActorLocation().Z);
+			BowlingRebound = FMath::Max(BowlingRebound, Bowling->GetActorLocation().Z);
+		}
+	}
+	AddInfo(FString::Printf(TEXT("Rebound heights: basketball %.1fcm, bowling %.1fcm"), BasketballRebound, BowlingRebound));
+	TestTrue(TEXT("Basketball visibly bounces"), BasketballRebound > 45.f);
+	TestTrue(TEXT("Bowling ball stays low after impact"), BowlingRebound < 25.f);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FItemScaleEditingTest, "HundredButtons.Placement.ManualScaleSurvivesReconstruction",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FItemScaleEditingTest::RunTest(const FString& Parameters)
+{
+	InteractionTests::FWorldFixture F;
+	AActor* Items[] = { F.Spawn<AWoodenBlockTriangle>(FVector(0, 500, 0)),
+		F.Spawn<AWoodenBlockRectangle>(FVector(0, 800, 0)),
+		F.Spawn<ABoxItem>(FVector(0, 1100, 0)),
+		F.Spawn<ABasketballItem>(FVector(0, 1400, 0)),
+		F.Spawn<ABowlingBallItem>(FVector(0, 1700, 0)) };
+	for (AActor* Item : Items)
+	{
+		const FVector EditedScale(1.5f, 0.75f, 2.f);
+		Item->SetActorScale3D(EditedScale);
+		// 이동·속성 편집 시 에디터가 실행하는 재구성에서도 수동 Scale이 유지되어야 한다.
+		Item->RerunConstructionScripts();
+		TestTrue(*FString::Printf(TEXT("%s preserves edited scale"), *Item->GetClass()->GetName()),
+			Item->GetActorScale3D().Equals(EditedScale, 0.001f));
+	}
 	return true;
 }
 

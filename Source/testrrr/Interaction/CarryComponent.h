@@ -42,6 +42,16 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Carry")
 	bool TryDrop();
 
+	UFUNCTION(BlueprintPure, Category="Carry")
+	bool CanRotateHeldObject() const;
+
+	UFUNCTION(BlueprintCallable, Category="Carry")
+	bool TryRotateHeldObject(float DeltaTime);
+
+	// R을 누르고 있는 동안 초당 회전하는 각도. 프레임 속도와 무관하다.
+	UPROPERTY(EditAnywhere, Category="Carry", meta=(ClampMin="1", ClampMax="360", Units="deg/s"))
+	float HeldRotationSpeed = 90.f;
+
 	// 던지기 전략에서 사용하는 조건 조회. 이 함수 자체는 힘을 적용하지 않는다.
 	UFUNCTION(BlueprintPure, Category="Carry")
 	bool CanThrowHeldObject() const;
@@ -88,6 +98,7 @@ private:
 
 	// 잡을 때의 카메라 상대 회전과, 해제 시 복원할 기존 Pawn 충돌 응답이다.
 	FQuat RelativeHoldRotation = FQuat::Identity;
+	FRotator UprightHoldRotation = FRotator::ZeroRotator;
 	ECollisionResponse PreviousPawnResponse = ECR_Block;
 	// 물건 알림 도중 새로운 잡기·던지기가 재진입하여 같은 물리 부위를 조작하지 못하게 한다.
 	bool bCarryTransition = false;
