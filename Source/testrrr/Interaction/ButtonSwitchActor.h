@@ -10,6 +10,7 @@
 #include "InteractableActor.h"
 #include "ButtonSwitchActor.generated.h"
 
+class USceneComponent;
 class UStaticMeshComponent;
 
 // 생성·환경 변경 등 스위치별 기능은 자식의 Activate에서 구현한다.
@@ -26,6 +27,10 @@ public:
 	// 효과 요청이 수락된 경우에만 true를 반환한다. 부모가 이후 쿨다운을 적용한다.
 	UFUNCTION(BlueprintNativeEvent, Category="Switch")
 	bool Activate(const FInteractionContext& Context);
+
+	// 액터와 생성 지점은 이 1배율 루트를 기준으로 배치한다.
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components")
+	TObjectPtr<USceneComponent> SwitchRoot;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components")
 	TObjectPtr<UStaticMeshComponent> Mesh;

@@ -5,17 +5,24 @@
  */
 
 #include "Interaction/ButtonSwitchActor.h"
+#include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
+#include "Materials/MaterialInterface.h"
 #include "Engine/World.h"
 #include "Templates/UnrealTemplate.h"
 #include "UObject/ConstructorHelpers.h"
 
 AButtonSwitchActor::AButtonSwitchActor()
 {
-	// 자식이 외형을 바꾸기 전에도 탐색을 확인할 수 있도록 기본 충돌 메쉬를 제공한다.
+	// 월드 배치와 SpawnPoint는 항상 1배율 루트를 사용한다.
+	SwitchRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SwitchRoot"));
+	SetRootComponent(SwitchRoot);
+	SwitchRoot->SetRelativeScale3D(FVector::OneVector);
+
+	// 표시·충돌용 큐브만 축소한다. 따라서 자식 컴포넌트와 생성 액터는 축소되지 않는다.
 	Mesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Mesh"));
-	SetRootComponent(Mesh);
+	Mesh->SetupAttachment(SwitchRoot);
 	Mesh->SetCollisionProfileName(TEXT("BlockAllDynamic"));
 	Mesh->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> Cube(TEXT("/Engine/BasicShapes/Cube.Cube"));
@@ -23,7 +30,15 @@ AButtonSwitchActor::AButtonSwitchActor()
 	{
 		Mesh->SetStaticMesh(Cube.Object);
 	}
-	Mesh->SetRelativeScale3D(FVector(0.2f, 0.5f, 0.5f));
+	// 모든 스위치는 1m 기본 큐브를 25cm 정육면체 버튼으로 사용한다.
+	Mesh->SetRelativeScale3D(FVector(0.25f));
+
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> RedButtonMaterial(
+		TEXT("/Game/HHR/M_HHR_ButtonRed.M_HHR_ButtonRed"));
+	if (RedButtonMaterial.Succeeded())
+	{
+		Mesh->SetMaterial(0, RedButtonMaterial.Object);
+	}
 	InteractionPrompt = NSLOCTEXT("Interaction", "Press", "누르기");
 	DisabledReason = NSLOCTEXT("Interaction", "SwitchUnavailable", "지금은 사용할 수 없습니다");
 }

@@ -11,5 +11,5 @@ AWoodenBlockTriangle::AWoodenBlockTriangle()
 		Mesh->SetStaticMesh(Ramp.Object);
 	}
 	ItemMass = 15.f;
-	SetDefaultItemDimensions(FVector(100.f, 100.f, 50.f));
+	SetDefaultItemDimensions(FVector(150.f, 150.f, 75.f));
 }

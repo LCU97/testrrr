@@ -5,7 +5,7 @@
 
 ABowlingBallItem::ABowlingBallItem()
 {
-	Mesh->SetRelativeScale3D(FVector(0.22f));
+	Mesh->SetRelativeScale3D(FVector(0.4f));
 	MassKg = 30.f;
 	BallColor = FLinearColor::FromSRGBColor(FColor(22, 35, 88));
 	Roughness = 0.2f;

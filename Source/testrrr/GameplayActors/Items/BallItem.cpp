@@ -11,8 +11,8 @@ ABallItem::ABallItem()
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> Sphere(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> Material(TEXT("/Game/LevelPrototyping/Materials/M_FlatCol.M_FlatCol"));
 	if (Sphere.Succeeded()) { Mesh->SetStaticMesh(Sphere.Object); }
-	// 기본 Sphere 지름은 100cm. 이후 에디터/BP에서 자유롭게 Scale을 수정한다.
-	Mesh->SetRelativeScale3D(FVector(0.24f));
+	// 기본 Sphere 지름은 100cm. 농구공 기본 지름은 50cm로 사용한다.
+	Mesh->SetRelativeScale3D(FVector(0.5f));
 	if (Material.Succeeded())
 	{
 		BallMaterial = Material.Object;
