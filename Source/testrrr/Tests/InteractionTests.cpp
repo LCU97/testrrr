@@ -186,6 +186,49 @@ bool FInteractionSphereTraceTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPhysicalSwitchTriggerTest, "HundredButtons.Interaction.PhysicalSwitchTrigger",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FPhysicalSwitchTriggerTest::RunTest(const FString& Parameters)
+{
+	InteractionTests::FWorldFixture F;
+	AToggleSwitchActor* Switch = F.Spawn<AToggleSwitchActor>(FVector::ZeroVector);
+	APickupActor* Item = F.Spawn<APickupActor>(FVector(100.f, 0.f, 0.f));
+	FHitResult Hit;
+
+	TestEqual(TEXT("Physical trigger is wider than the 25cm visible button"),
+		Switch->PhysicalTrigger->GetUnscaledBoxExtent(), FVector(20.f));
+	TestTrue(TEXT("Physical trigger generates overlaps"), Switch->PhysicalTrigger->GetGenerateOverlapEvents());
+	TestEqual(TEXT("Physical trigger is query-only"), Switch->PhysicalTrigger->GetCollisionEnabled(),
+		ECollisionEnabled::QueryOnly);
+	TestEqual(TEXT("Physical trigger overlaps physics bodies"),
+		Switch->PhysicalTrigger->GetCollisionResponseToChannel(ECC_PhysicsBody), ECR_Overlap);
+	TestEqual(TEXT("Pickup uses the physics-body object channel"), Item->Mesh->GetCollisionObjectType(), ECC_PhysicsBody);
+	TestTrue(TEXT("Pickup body simulates physics"), Item->Mesh->IsSimulatingPhysics());
+
+	Switch->PhysicalTrigger->OnComponentBeginOverlap.Broadcast(
+		Switch->PhysicalTrigger, Item, Item->Mesh, 0, false, Hit);
+	TestTrue(TEXT("First physical contact activates the switch"), Switch->bIsOn);
+
+	Switch->PhysicalTrigger->OnComponentBeginOverlap.Broadcast(
+		Switch->PhysicalTrigger, Item, Item->Mesh, 0, false, Hit);
+	TestTrue(TEXT("Repeated begin overlap while touching does not activate again"), Switch->bIsOn);
+	Switch->PhysicalTrigger->OnComponentEndOverlap.Broadcast(Switch->PhysicalTrigger, Item, Item->Mesh, 0);
+	Switch->PhysicalTrigger->OnComponentEndOverlap.Broadcast(Switch->PhysicalTrigger, Item, Item->Mesh, 0);
+	F.Tick(0.21f);
+	Switch->PhysicalTrigger->OnComponentBeginOverlap.Broadcast(
+		Switch->PhysicalTrigger, Item, Item->Mesh, 0, false, Hit);
+	TestFalse(TEXT("Leaving and re-entering activates again"), Switch->bIsOn);
+
+	AToggleSwitchActor* HeldItemSwitch = F.Spawn<AToggleSwitchActor>(FVector(500.f, 0.f, 0.f));
+	APickupActor* HeldItem = F.Spawn<APickupActor>(FVector(600.f, 0.f, 0.f));
+	HeldItem->Carryable->CurrentCarrier = F.Player;
+	HeldItemSwitch->PhysicalTrigger->OnComponentBeginOverlap.Broadcast(
+		HeldItemSwitch->PhysicalTrigger, HeldItem, HeldItem->Mesh, 0, false, Hit);
+	TestFalse(TEXT("An item carried by the player cannot activate a physical switch"), HeldItemSwitch->bIsOn);
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FInteractionCarryTest, "HundredButtons.Interaction.CarryDropAndDestruction",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
