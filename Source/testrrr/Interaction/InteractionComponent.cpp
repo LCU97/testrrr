@@ -158,7 +158,7 @@ void UInteractionComponent::RefreshTarget()
 		FText DropPrompt = FText::Format(NSLOCTEXT("Interaction", "DropHint", "[{0}] 내려놓기"), DropInputLabel);
 		if (Carry->CanRotateHeldObject())
 		{
-			DropPrompt = FText::Format(NSLOCTEXT("Interaction", "RotateAndDropHint", "[{0}] 수평 회전   ·   {1}"), RotateInputLabel, DropPrompt);
+			DropPrompt = FText::Format(NSLOCTEXT("Interaction", "MouseRotateAndDropHint", "[{0}] + 마우스 회전   ·   {1}"), RotateInputLabel, DropPrompt);
 		}
 		const FText UsePrompt = ItemUse ? ItemUse->GetUsePrompt() : FText::GetEmpty();
 		SetPrompt(UsePrompt.IsEmpty() ? DropPrompt

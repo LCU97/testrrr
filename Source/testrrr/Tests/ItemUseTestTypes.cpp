@@ -6,6 +6,15 @@
 
 #include "Tests/ItemUseTestTypes.h"
 #include "Interaction/CarryComponent.h"
+#include "Interaction/InteractionComponent.h"
+#include "Camera/CameraComponent.h"
+
+AInteractionTestCharacter::AInteractionTestCharacter()
+{
+	// 테스트에는 캐릭터 메시 에셋이 없으므로 카메라를 head 소켓 대신 루트에 붙인다.
+	GetFirstPersonCameraComponent()->SetupAttachment(GetRootComponent());
+	InteractionComponent->bShowDefaultPrompt = false;
+}
 
 FItemUseResult UItemUseTestBehavior::BeginUse_Implementation(const FItemUseContext& Context)
 {

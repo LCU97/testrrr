@@ -4,18 +4,19 @@
 
 ## 클래스 위치
 
-- `C++ Classes / testrrr / GameplayActors / Items`: WoodenBlockRectangle, WoodenBlockTriangle, ChairItem, BoxItem.
+- `C++ Classes / testrrr / GameplayActors / Items`: WoodenBlockRectangle, WoodenBlockTriangle, ChairItem, BoxItem, DominoItem, BasketballItem, BowlingBallItem.
 - `C++ Classes / testrrr / GameplayActors / Switches`: ItemSpawnSwitch.
 - PlacementItem은 공통 설정을 묶는 추상 부모이므로 직접 배치하지 않는다.
 
 ## 아이템
 
-기존 PickupActor의 E 줍기 / G 내려놓기를 사용한다. 네 아이템 모두 R을 누르고 있는 동안 월드 수직축 기준 초당 90도로 부드럽게 회전하며, 손을 떼면 목표 회전 갱신이 멈춘다. CarryComponent의 Held Rotation Speed로 속도를 조절한다. 시선의 위아래 움직임 때문에 배치용 아이템이 기울지 않도록 수평을 유지한다. 회전 중에도 벽·바닥의 물리 충돌은 유지한다. 잡는 거리와 화면 가림은 기존 설정을 유지한다.
+기존 PickupActor의 E 줍기 / G 내려놓기를 사용한다. R 회전은 제거했다. 물건을 든 상태에서 왼쪽 Shift를 누르고 마우스를 움직이면 수평·수직으로 물건만 회전한다. 이때 카메라와 캐릭터에 마우스 회전 입력을 보내지 않는다. Shift를 놓으면 물건의 자세를 유지하고 카메라 입력을 복구한다. 내려놓기·던지기·삭제·거리 초과 강제 해제·빙의 해제·입력 취소 때도 회전 모드를 정리한다. 빈손이나 회전 금지 아이템은 카메라를 잠그지 않는다. CarryComponent의 Held Rotation Sensitivity(EditAnywhere/BlueprintReadWrite)로 감도를 조절하며 기본값은 0.35다. 물건의 수평 강제 보정은 제거했고, 회전 중에도 벽·바닥의 물리 충돌은 유지한다. 잡는 거리와 화면 가림은 기존 설정을 유지한다.
 
 - 직사각형: 기본 Cube, 전체 크기 100 × 100 × 50cm, 20kg.
 - 삼각형: `/Game/LevelPrototyping/Meshes/SM_Ramp`, 전체 크기 100 × 100 × 50cm, 15kg.
 - 상자: 기본 Cube, 60 × 60 × 60cm, 5kg.
 - 의자: `/Game/Resources/chair1`, 원본 크기, 8kg.
+- 도미노: 기본 Cube, 두께(X) 12 × 폭(Y) 45 × 높이(Z) 90cm, 2kg. 수직으로 세우고 X방향으로 넘어뜨린다. 기본 시험 간격은 중심 간 60cm다. 실제 물리 충돌로 다음 조각을 넘어뜨리며 가짜 연쇄 명령은 없다. 생성 스위치에서 DominoItem을 선택하면 반복 생성 가능하다. 현재 탈출 스위치의 충돌 연동은 포함하지 않는다.
 
 크기는 일반 Transform / Scale 또는 자식 블루프린트의 Mesh Scale로 변경한다. C++ 생성자에서 최초 기본 크기만 지정하며, 편집·재구성·플레이 시작 시 스케일을 덮어쓰지 않는다. Item Mass는 BlueprintReadWrite로 노출한다. 나무 외관용 재질은 아직 별도로 지정하지 않았다. 기존 메시 에셋은 수정하지 않는다.
 

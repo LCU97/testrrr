@@ -9,6 +9,9 @@
 #include "Misc/AutomationTest.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "Engine/StaticMesh.h"
+#include "GameFramework/PlayerController.h"
+#include "Engine/LocalPlayer.h"
 #include "Components/BoxComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -25,6 +28,7 @@
 #include "GameplayActors/Items/WoodenBlockTriangle.h"
 #include "GameplayActors/Items/BoxItem.h"
 #include "GameplayActors/Items/ChairItem.h"
+#include "GameplayActors/Items/DominoItem.h"
 #include "GameplayActors/Items/BasketballItem.h"
 #include "GameplayActors/Items/BowlingBallItem.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -680,7 +684,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPlacementItemsTest, "HundredButtons.Placement.
 bool FPlacementItemsTest::RunTest(const FString& Parameters)
 {
 	InteractionTests::FWorldFixture F;
-	TestFalse(TEXT("Empty hand rotation is harmless"), F.Carry->TryRotateHeldObject(1.f / 60.f));
+	TestFalse(TEXT("Empty hand cannot enter rotation mode"), F.Carry->BeginRotateHeldObject());
 	APlacementItem* Items[] = {
 		F.Spawn<AWoodenBlockRectangle>(FVector(180, 0, 0)),
 		F.Spawn<AWoodenBlockTriangle>(FVector(180, 300, 0)),
@@ -698,28 +702,30 @@ bool FPlacementItemsTest::RunTest(const FString& Parameters)
 		F.Player->SetActorLocation(Item->GetActorLocation() - FVector(180, 0, 0));
 		TestTrue(TEXT("Item can be picked up"), F.Carry->TryGrab(Item->Carryable, Context));
 		F.Player->SetActorRotation(FRotator(35, 0, 0));
-		TestFalse(TEXT("Zero elapsed time does not rotate"), F.Carry->TryRotateHeldObject(0.f));
-		for (int32 Frame = 0; Frame < 10; ++Frame)
-		{
-			TestTrue(TEXT("Holding R rotates each frame"), F.Carry->TryRotateHeldObject(1.f / 60.f));
-		}
+		TestFalse(TEXT("Mouse rotation requires Shift mode"), F.Carry->RotateHeldObject(FVector2D(10, 10)));
+		TestTrue(TEXT("Shift begins rotation"), F.Carry->BeginRotateHeldObject());
+		F.Carry->HeldRotationSensitivity = 1.f;
+		TestTrue(TEXT("Mouse rotates held object"), F.Carry->RotateHeldObject(FVector2D(30, 25)));
 		FVector Location;
 		FRotator Rotation;
 		F.Player->FindComponentByClass<UPhysicsHandleComponent>()->GetTargetLocationAndRotation(Location, Rotation);
-		TestTrue(TEXT("Holding R for a sixth of a second rotates fifteen degrees"), FMath::IsNearlyEqual(Rotation.Yaw, 15.f, 0.1f));
-		TestTrue(TEXT("Looking up does not tip placement item"), FMath::IsNearlyZero(Rotation.Pitch, 0.1f)
-			&& FMath::IsNearlyZero(Rotation.Roll, 0.1f));
-		F.Carry->TryRotateHeldObject(1.f / 6.f);
-		F.Player->FindComponentByClass<UPhysicsHandleComponent>()->GetTargetLocationAndRotation(Location, Rotation);
-		TestTrue(TEXT("A single long frame rotates by the same amount"), FMath::IsNearlyEqual(Rotation.Yaw, 30.f, 0.1f));
+		TestTrue(TEXT("Mouse yaw rotates horizontally"), FMath::Abs(Rotation.Yaw) > 10.f);
+		TestTrue(TEXT("Mouse pitch rotates vertically"), FMath::Abs(Rotation.Pitch) > 10.f);
+		const FQuat EditedRotation = Rotation.Quaternion();
+		F.Carry->EndRotateHeldObject();
+		TestFalse(TEXT("Shift release ends rotation"), F.Carry->IsRotatingHeldObject());
+		TestFalse(TEXT("Mouse no longer rotates after Shift release"), F.Carry->RotateHeldObject(FVector2D(90, 90)));
+		F.Player->SetActorRotation(FRotator(-20, 90, 0));
 		F.Tick(1.f / 60.f);
 		F.Player->FindComponentByClass<UPhysicsHandleComponent>()->GetTargetLocationAndRotation(Location, Rotation);
-		TestTrue(TEXT("Without held-key requests rotation target stops"), FMath::IsNearlyEqual(Rotation.Yaw, 30.f, 0.1f));
+		TestTrue(TEXT("Camera movement preserves chosen item orientation"), Rotation.Quaternion().Equals(EditedRotation, 0.001f));
+		F.Carry->BeginRotateHeldObject();
 		TestTrue(TEXT("Item drops after rotation"), F.Carry->TryDrop());
+		TestFalse(TEXT("Dropping clears rotation mode"), F.Carry->IsRotatingHeldObject());
 		F.Player->SetActorRotation(FRotator::ZeroRotator);
 	}
-	const FVector RectangleSize = Items[0]->Mesh->Bounds.BoxExtent * 2.f;
-	const FVector TriangleSize = Items[1]->Mesh->Bounds.BoxExtent * 2.f;
+	const FVector RectangleSize = Items[0]->Mesh->GetStaticMesh()->GetBoundingBox().GetSize() * Items[0]->Mesh->GetComponentScale();
+	const FVector TriangleSize = Items[1]->Mesh->GetStaticMesh()->GetBoundingBox().GetSize() * Items[1]->Mesh->GetComponentScale();
 	TestTrue(TEXT("Blocks share actual outer dimensions"), RectangleSize.Equals(TriangleSize, 0.1f));
 	TestTrue(TEXT("Block dimensions are 100x100x50 cm"), RectangleSize.Equals(FVector(100, 100, 50), 0.1f));
 	return true;
@@ -830,6 +836,89 @@ bool FItemScaleEditingTest::RunTest(const FString& Parameters)
 		Item->RerunConstructionScripts();
 		TestTrue(*FString::Printf(TEXT("%s preserves edited scale"), *Item->GetClass()->GetName()),
 			Item->GetActorScale3D().Equals(EditedScale, 0.001f));
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMouseItemRotationTest, "HundredButtons.Placement.ShiftMouseCameraAndCleanup",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FMouseItemRotationTest::RunTest(const FString& Parameters)
+{
+	InteractionTests::FWorldFixture F;
+	AInteractionTestCharacter* Character = F.Spawn<AInteractionTestCharacter>(FVector(0, 0, 200));
+	APlayerController* Controller = F.World->SpawnActor<APlayerController>();
+	// AddControllerYaw/PitchInput은 로컬 플레이어의 컨트롤러만 받는다.
+	Controller->Player = NewObject<ULocalPlayer>(GEngine);
+	Controller->Possess(Character);
+	UCarryComponent* Carry = Character->FindComponentByClass<UCarryComponent>();
+	ADominoItem* Item = F.Spawn<ADominoItem>(FVector(180, 0, 200));
+	FInteractionContext Context;
+	Context.Interactor = Character;
+	TestTrue(TEXT("Domino can be picked up"), Carry->TryGrab(Item->Carryable, Context));
+	Character->BeginRotateForTest();
+	TestTrue(TEXT("Shift enables held-item rotation"), Carry->IsRotatingHeldObject());
+	const FRotator BodyRotation = Character->GetActorRotation();
+	const FRotator ViewRotation = Controller->GetControlRotation();
+	Controller->RotationInput = FRotator::ZeroRotator;
+	Character->AimForTest(50, 30);
+	TestTrue(TEXT("Mouse does not queue camera rotation while Shift is held"), Controller->RotationInput.IsNearlyZero());
+	TestTrue(TEXT("Camera orientation stays fixed"), Controller->GetControlRotation().Equals(ViewRotation));
+	TestTrue(TEXT("Character body stays fixed"), Character->GetActorRotation().Equals(BodyRotation));
+	FVector Location;
+	FRotator Rotation;
+	Character->FindComponentByClass<UPhysicsHandleComponent>()->GetTargetLocationAndRotation(Location, Rotation);
+	TestFalse(TEXT("Mouse rotated held item on both axes"), FMath::IsNearlyZero(Rotation.Yaw) || FMath::IsNearlyZero(Rotation.Pitch));
+	Character->EndRotateForTest();
+	Character->AimForTest(5, 3);
+	TestFalse(TEXT("Camera input resumes on Shift release"), Controller->RotationInput.IsNearlyZero());
+	Controller->RotationInput = FRotator::ZeroRotator;
+	Character->BeginRotateForTest();
+	Carry->TryDrop();
+	Character->AimForTest(5, 3);
+	TestFalse(TEXT("Dropping restores camera input even while Shift was held"), Controller->RotationInput.IsNearlyZero());
+	TestFalse(TEXT("Drop clears rotation state"), Carry->IsRotatingHeldObject());
+	TestTrue(TEXT("Domino can be grabbed again"), Carry->TryGrab(Item->Carryable, Context));
+	Character->BeginRotateForTest();
+	Item->Destroy();
+	TestFalse(TEXT("Destroyed item clears rotation state"), Carry->IsRotatingHeldObject());
+	Controller->RotationInput = FRotator::ZeroRotator;
+	Character->AimForTest(5, 3);
+	TestFalse(TEXT("Destroyed item restores camera input"), Controller->RotationInput.IsNearlyZero());
+	Character->BeginRotateForTest();
+	TestFalse(TEXT("Empty-hand Shift cannot lock camera"), Carry->IsRotatingHeldObject());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDominoPhysicsTest, "HundredButtons.Domino.PhysicalChain",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDominoPhysicsTest::RunTest(const FString& Parameters)
+{
+	InteractionTests::FWorldFixture F;
+	AActor* Floor = F.World->SpawnActor<AActor>();
+	UBoxComponent* FloorBody = NewObject<UBoxComponent>(Floor);
+	Floor->SetRootComponent(FloorBody);
+	Floor->AddInstanceComponent(FloorBody);
+	FloorBody->SetBoxExtent(FVector(1500, 1000, 25));
+	FloorBody->SetCollisionProfileName(TEXT("BlockAll"));
+	FloorBody->RegisterComponent();
+	Floor->SetActorLocation(FVector(0, 0, -25));
+	TArray<ADominoItem*> Dominoes;
+	for (int32 Index = 0; Index < 8; ++Index)
+	{
+		Dominoes.Add(F.Spawn<ADominoItem>(FVector(500 + Index * 60, 300, 45.5f)));
+	}
+	for (int32 Frame = 0; Frame < 60; ++Frame) { F.Tick(1.f / 120.f); }
+	for (const ADominoItem* Domino : Dominoes)
+	{
+		TestTrue(TEXT("Domino stands before being pushed"), Domino->GetActorUpVector().Z > 0.98f);
+	}
+	Dominoes[0]->Mesh->AddImpulseAtLocation(FVector(150, 0, 0), Dominoes[0]->GetActorLocation() + FVector(0, 0, 42));
+	for (int32 Frame = 0; Frame < 600; ++Frame) { F.Tick(1.f / 120.f); }
+	for (int32 Index = 0; Index < Dominoes.Num(); ++Index)
+	{
+		TestTrue(*FString::Printf(TEXT("Domino %d falls through actual physics"), Index), Dominoes[Index]->GetActorUpVector().Z < 0.7f);
 	}
 	return true;
 }

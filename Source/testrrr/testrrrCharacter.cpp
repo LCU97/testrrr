@@ -94,21 +94,21 @@ void AtestrrrCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCo
 			UseItemAction->ValueType = EInputActionValueType::Boolean;
 		}
 		// 사용 동작은 액터가 선택하며, 입력 계층은 사용 요청과 키 배정만 관리한다.
-		if (!RotateItemAction)
+		if (!RotateHoldAction)
 		{
-			RotateItemAction = NewObject<UInputAction>(this, TEXT("IA_RotateItem"));
-			RotateItemAction->ValueType = EInputActionValueType::Boolean;
+			RotateHoldAction = NewObject<UInputAction>(this, TEXT("IA_RotateHeldItem"));
+			RotateHoldAction->ValueType = EInputActionValueType::Boolean;
 		}
 		InteractionMappingContext = NewObject<UInputMappingContext>(this);
 		InteractionMappingContext->MapKey(InteractAction, InteractKey);
 		InteractionMappingContext->MapKey(DropAction, DropKey);
 		InteractionMappingContext->MapKey(UseItemAction, UseItemKey);
-		InteractionMappingContext->MapKey(RotateItemAction, RotateItemKey);
+		InteractionMappingContext->MapKey(RotateHoldAction, RotateHoldKey);
 		// 실제 키 배정과 화면에 표시하는 키 이름이 일치하도록 맞춘다.
 		InteractionComponent->InteractInputLabel = InteractKey.GetDisplayName();
 		InteractionComponent->DropInputLabel = DropKey.GetDisplayName();
 		InteractionComponent->UseInputLabel = UseItemKey.GetDisplayName();
-		InteractionComponent->RotateInputLabel = RotateItemKey.GetDisplayName();
+		InteractionComponent->RotateInputLabel = RotateHoldKey.GetDisplayName();
 		if (APlayerController* PC = Cast<APlayerController>(GetController()))
 		{
 			if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer()))
@@ -121,8 +121,10 @@ void AtestrrrCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCo
 		// Started를 사용하여 키를 누른 한 번에 한 번만 요청한다. 누르는 동안 반복하지 않는다.
 		EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Started, this, &AtestrrrCharacter::DoInteract);
 		EnhancedInputComponent->BindAction(DropAction, ETriggerEvent::Started, this, &AtestrrrCharacter::DoDrop);
-		// 누르는 동안 매 프레임 회전하고, 놓으면 더 이상 회전 요청을 보내지 않는다.
-		EnhancedInputComponent->BindAction(RotateItemAction, ETriggerEvent::Triggered, this, &AtestrrrCharacter::DoRotateItem);
+		EnhancedInputComponent->BindAction(RotateHoldAction, ETriggerEvent::Started, this, &AtestrrrCharacter::DoBeginRotateItem);
+		EnhancedInputComponent->BindAction(RotateHoldAction, ETriggerEvent::Triggered, this, &AtestrrrCharacter::DoBeginRotateItem);
+		EnhancedInputComponent->BindAction(RotateHoldAction, ETriggerEvent::Completed, this, &AtestrrrCharacter::DoEndRotateItem);
+		EnhancedInputComponent->BindAction(RotateHoldAction, ETriggerEvent::Canceled, this, &AtestrrrCharacter::DoEndRotateItem);
 		// 단발·지속 동작이 같은 액션을 사용한다. 지속 갱신은 사용 세션의 Tick이 담당한다.
 		EnhancedInputComponent->BindAction(UseItemAction, ETriggerEvent::Started, this, &AtestrrrCharacter::DoBeginUseItem);
 		EnhancedInputComponent->BindAction(UseItemAction, ETriggerEvent::Completed, this, &AtestrrrCharacter::DoEndUseItem);
@@ -157,15 +159,21 @@ void AtestrrrCharacter::DoDrop()
 	CarryComponent->TryDrop();
 }
 
-void AtestrrrCharacter::DoRotateItem()
+void AtestrrrCharacter::DoBeginRotateItem()
 {
-	CarryComponent->TryRotateHeldObject(GetWorld()->GetDeltaSeconds());
+	CarryComponent->BeginRotateHeldObject();
+}
+
+void AtestrrrCharacter::DoEndRotateItem()
+{
+	CarryComponent->EndRotateHeldObject();
 }
 
 void AtestrrrCharacter::RemoveInteractionMapping()
 {
 	// 입력 문맥을 바꿀 때 키 종료 이벤트가 오지 않더라도 지속 효과는 반드시 멈춘다.
 	ItemUseComponent->CancelUseInput();
+	CarryComponent->EndRotateHeldObject();
 	// 전체 입력을 지우지 않고 자신이 추가한 문맥만 제거한다.
 	if (InteractionInputSubsystem.IsValid() && InteractionMappingContext)
 	{
@@ -226,6 +234,12 @@ void AtestrrrCharacter::LookInput(const FInputActionValue& Value)
 
 void AtestrrrCharacter::DoAim(float Yaw, float Pitch)
 {
+	// 마우스 입력을 물건에만 전달한다. Controller 회전을 쌓지 않으므로 해제 시 튀지 않는다.
+	if (CarryComponent->IsRotatingHeldObject())
+	{
+		CarryComponent->RotateHeldObject(FVector2D(Yaw, Pitch));
+		return;
+	}
 	if (GetController())
 	{
 		// pass the rotation inputs

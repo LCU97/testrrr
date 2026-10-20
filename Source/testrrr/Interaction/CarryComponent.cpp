@@ -110,8 +110,7 @@ bool UCarryComponent::TryGrab(UCarryableComponent* Target, const FInteractionCon
 	HeldCarryable = Target;
 	HeldPrimitive = Body;
 	Target->CurrentCarrier = GetOwner();
-	RelativeHoldRotation = ViewRotation.Quaternion().Inverse() * Body->GetComponentQuat();
-	UprightHoldRotation = FRotator(0.f, Body->GetComponentRotation().Yaw, 0.f);
+	HeldWorldRotation = Body->GetComponentQuat();
 	// 운반 중 플레이어와의 충돌은 무시하되, 벽·바닥과의 물리 충돌은 유지한다.
 	// 발사 직후 다시 잡았다면 임시 Ignore 대신 발사 전의 원래 응답을 이어받는다.
 	PreviousPawnResponse = TakePendingPawnResponse(Body);
@@ -133,30 +132,37 @@ bool UCarryComponent::CanRotateHeldObject() const
 		&& HeldPrimitive->IsSimulatingPhysics();
 }
 
-bool UCarryComponent::TryRotateHeldObject(float DeltaTime)
+bool UCarryComponent::BeginRotateHeldObject()
 {
-	if (!CanRotateHeldObject() || !FMath::IsFinite(DeltaTime) || DeltaTime <= 0.f)
+	bRotatingHeldObject = CanRotateHeldObject();
+	return bRotatingHeldObject;
+}
+
+void UCarryComponent::EndRotateHeldObject()
+{
+	bRotatingHeldObject = false;
+}
+
+bool UCarryComponent::IsRotatingHeldObject() const
+{
+	return bRotatingHeldObject && CanRotateHeldObject();
+}
+
+bool UCarryComponent::RotateHeldObject(FVector2D MouseDelta)
+{
+	if (!IsRotatingHeldObject() || !FMath::IsFinite(MouseDelta.X) || !FMath::IsFinite(MouseDelta.Y))
 	{
 		return false;
 	}
 	FVector ViewLocation;
 	FRotator ViewRotation;
 	InteractionView::GetViewPoint(GetOwner(), ViewLocation, ViewRotation);
-	const float Step = FMath::Clamp(HeldRotationSpeed, 1.f, 360.f) * DeltaTime;
-	FQuat TargetRotation;
-	if (HeldCarryable->bKeepUprightWhileCarried)
-	{
-		UprightHoldRotation.Yaw = FRotator::NormalizeAxis(UprightHoldRotation.Yaw + Step);
-		TargetRotation = UprightHoldRotation.Quaternion();
-	}
-	else
-	{
-		// 월드의 수직축을 기준으로 회전한다. 카메라가 기울어져도 회전축은 수평이다.
-		TargetRotation = FQuat(FVector::UpVector, FMath::DegreesToRadians(Step))
-			* ViewRotation.Quaternion() * RelativeHoldRotation;
-		RelativeHoldRotation = ViewRotation.Quaternion().Inverse() * TargetRotation;
-	}
-	PhysicsHandle->SetTargetRotation(TargetRotation.Rotator());
+	const float Sensitivity = FMath::Clamp(HeldRotationSensitivity, 0.01f, 10.f);
+	const FVector CameraRight = FRotationMatrix(ViewRotation).GetUnitAxis(EAxis::Y);
+	const FQuat Yaw(FVector::UpVector, FMath::DegreesToRadians(MouseDelta.X * Sensitivity));
+	const FQuat Pitch(CameraRight, FMath::DegreesToRadians(-MouseDelta.Y * Sensitivity));
+	HeldWorldRotation = (Yaw * Pitch * HeldWorldRotation).GetNormalized();
+	PhysicsHandle->SetTargetRotation(HeldWorldRotation.Rotator());
 	HeldPrimitive->WakeAllRigidBodies();
 	return true;
 }
@@ -323,6 +329,7 @@ void UCarryComponent::ForceRelease()
 
 void UCarryComponent::ReleaseHeldObject(ECarryReleaseReason Reason)
 {
+	EndRotateHeldObject();
 	UCarryableComponent* Carryable = HeldCarryable.Get();
 	UPrimitiveComponent* Body = HeldPrimitive.Get();
 	// 정리할 상태가 있었을 때만 변경 알림을 보낸다.
@@ -390,8 +397,7 @@ void UCarryComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActor
 		ForceRelease();
 		return;
 	}
-	// 카메라 앞 목표 위치와 잡을 때의 상대 회전을 매 프레임 물리 핸들에 전달한다.
+	// 위치만 카메라를 따라가고, 물건의 수동 회전 자세는 유지한다.
 	PhysicsHandle->SetTargetLocationAndRotation(ViewLocation + ViewRotation.Vector() * HoldDistance,
-		HeldCarryable->bKeepUprightWhileCarried ? UprightHoldRotation
-		: (ViewRotation.Quaternion() * RelativeHoldRotation).Rotator());
+		HeldWorldRotation.Rotator());
 }

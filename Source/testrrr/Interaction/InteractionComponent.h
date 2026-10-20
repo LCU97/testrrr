@@ -26,7 +26,7 @@ class TESTRRR_API UInteractionComponent : public UActorComponent
 
 public:
 	UPROPERTY(EditAnywhere, Category="Interaction")
-	FText RotateInputLabel = FText::FromString(TEXT("R"));
+	FText RotateInputLabel = FText::FromString(TEXT("Left Shift"));
 
 	UInteractionComponent();
 

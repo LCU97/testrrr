@@ -7,7 +7,6 @@
 APlacementItem::APlacementItem()
 {
 	Carryable->bCanRotateWhileCarried = true;
-	Carryable->bKeepUprightWhileCarried = true;
 	Carryable->bCanThrow = false;
 	Mesh->SetMobility(EComponentMobility::Movable);
 	Mesh->SetLinearDamping(0.1f);

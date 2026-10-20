@@ -9,6 +9,7 @@
 #include "CoreMinimal.h"
 #include "Interaction/ItemUseBehavior.h"
 #include "Interaction/ThrowablePickupActor.h"
+#include "testrrrCharacter.h"
 #include "ItemUseTestTypes.generated.h"
 
 UCLASS(Transient, NotBlueprintable, HideDropdown)
@@ -41,4 +42,15 @@ public:
 	int32 ThrownCount = 0;
 	FItemThrowInfo LastThrow;
 	virtual void OnItemThrown_Implementation(const FItemThrowInfo& Info) override;
+};
+
+UCLASS(Transient, NotBlueprintable, HideDropdown)
+class AInteractionTestCharacter : public AtestrrrCharacter
+{
+	GENERATED_BODY()
+public:
+	AInteractionTestCharacter();
+	void AimForTest(float Yaw, float Pitch) { DoAim(Yaw, Pitch); }
+	void BeginRotateForTest() { DoBeginRotateItem(); }
+	void EndRotateForTest() { DoEndRotateItem(); }
 };

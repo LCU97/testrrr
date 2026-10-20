@@ -24,8 +24,7 @@ ABallItem::ABallItem()
 	Mesh->SetUseCCD(true);
 	Mesh->SetLinearDamping(0.02f);
 	Mesh->SetAngularDamping(0.03f);
-	Carryable->bCanRotateWhileCarried = false;
-	Carryable->bKeepUprightWhileCarried = false;
+	Carryable->bCanRotateWhileCarried = true;
 }
 
 void ABallItem::OnConstruction(const FTransform& Transform)
